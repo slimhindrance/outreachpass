@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Standalone output for Amplify Hosting WEB_COMPUTE
-  output: 'standalone',
+  // Static export for Amplify Hosting WEB platform
+  output: 'export',
   images: {
     unoptimized: true,
   },
