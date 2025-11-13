@@ -1,0 +1,20 @@
+version: 1
+applications:
+  - appRoot: frontend-outreachpass
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - cd frontend-outreachpass
+            - npm ci
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: frontend-outreachpass/.next
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - frontend-outreachpass/node_modules/**/*
+          - frontend-outreachpass/.next/cache/**/*
