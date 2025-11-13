@@ -1,9 +1,7 @@
-const { withAmplifyAdapter } = require('@aws-amplify/adapter-nextjs');
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Use Amplify adapter for WEB_COMPUTE deployment
-  // This generates the required deploy-manifest.json file
+  // Standalone output for Amplify Hosting WEB_COMPUTE
+  output: 'standalone',
   images: {
     unoptimized: true,
   },
@@ -17,4 +15,4 @@ const nextConfig = {
   },
 }
 
-module.exports = withAmplifyAdapter(nextConfig)
+module.exports = nextConfig
