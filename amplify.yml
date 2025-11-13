@@ -5,16 +5,15 @@ applications:
       phases:
         preBuild:
           commands:
-            - cd frontend-outreachpass
             - npm ci
         build:
           commands:
             - npm run build
       artifacts:
-        baseDirectory: frontend-outreachpass/.next
+        baseDirectory: .next
         files:
           - '**/*'
       cache:
         paths:
-          - frontend-outreachpass/node_modules/**/*
-          - frontend-outreachpass/.next/cache/**/*
+          - node_modules/**/*
+          - .next/cache/**/*
