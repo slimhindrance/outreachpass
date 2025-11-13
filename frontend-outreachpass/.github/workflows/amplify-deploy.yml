@@ -1,0 +1,140 @@
+name: Deploy to AWS Amplify
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    name: Build and Deploy to Amplify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js application
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL || 'https://outreachpass.base2ml.com/api/v1' }}
+          NEXT_PUBLIC_COGNITO_USER_POOL_ID: ${{ secrets.NEXT_PUBLIC_COGNITO_USER_POOL_ID }}
+          NEXT_PUBLIC_COGNITO_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_COGNITO_CLIENT_ID }}
+          NEXT_PUBLIC_COGNITO_DOMAIN: ${{ secrets.NEXT_PUBLIC_COGNITO_DOMAIN }}
+          NEXT_PUBLIC_AWS_REGION: ${{ secrets.NEXT_PUBLIC_AWS_REGION || 'us-east-1' }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://outreachpassapp.base2ml.com' }}
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to Amplify
+        run: |
+          # Create or get Amplify app
+          APP_ID=$(aws amplify list-apps --region $AWS_REGION \
+            --query "apps[?name=='outreachpass-frontend'].appId" \
+            --output text)
+
+          if [ -z "$APP_ID" ]; then
+            echo "Creating new Amplify app..."
+            APP_ID=$(aws amplify create-app \
+              --name outreachpass-frontend \
+              --description "OutreachPass event management frontend with Next.js 15" \
+              --platform WEB \
+              --region $AWS_REGION \
+              --environment-variables \
+                NEXT_PUBLIC_API_URL=https://outreachpass.base2ml.com \
+                NEXT_PUBLIC_COGNITO_USER_POOL_ID=us-east-1_SXH934qKt \
+                NEXT_PUBLIC_COGNITO_CLIENT_ID=256e0chtcc14qf8m4knqmobdg0 \
+                NEXT_PUBLIC_COGNITO_DOMAIN=outreachpass-dev \
+                NEXT_PUBLIC_AWS_REGION=us-east-1 \
+              --query 'app.appId' \
+              --output text)
+            echo "Created app: $APP_ID"
+          else
+            echo "Using existing app: $APP_ID"
+          fi
+
+          # Create deployment zip
+          cd .next
+          zip -r ../deployment.zip . -x "*.git*"
+          cd ..
+
+          # Create deployment
+          DEPLOYMENT=$(aws amplify create-deployment \
+            --app-id $APP_ID \
+            --branch-name main \
+            --region $AWS_REGION)
+
+          JOB_ID=$(echo $DEPLOYMENT | jq -r '.jobId')
+          UPLOAD_URL=$(echo $DEPLOYMENT | jq -r '.zipUploadUrl')
+
+          echo "Job ID: $JOB_ID"
+          echo "Uploading deployment..."
+
+          # Upload zip file
+          curl -X PUT "$UPLOAD_URL" \
+            --upload-file deployment.zip \
+            -H "Content-Type: application/zip"
+
+          # Start deployment
+          aws amplify start-deployment \
+            --app-id $APP_ID \
+            --branch-name main \
+            --job-id $JOB_ID \
+            --region $AWS_REGION
+
+          # Wait for deployment
+          echo "Waiting for deployment to complete..."
+          for i in {1..30}; do
+            STATUS=$(aws amplify get-job \
+              --app-id $APP_ID \
+              --branch-name main \
+              --job-id $JOB_ID \
+              --region $AWS_REGION \
+              --query 'job.summary.status' \
+              --output text)
+
+            echo "Deployment status: $STATUS"
+
+            if [ "$STATUS" = "SUCCEED" ]; then
+              echo "✅ Deployment successful!"
+              break
+            elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELLED" ]; then
+              echo "❌ Deployment failed with status: $STATUS"
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          # Get deployment URL
+          URL=$(aws amplify get-app \
+            --app-id $APP_ID \
+            --region $AWS_REGION \
+            --query 'app.defaultDomain' \
+            --output text)
+
+          echo "🌐 Application URL: https://main.$URL"
+
+      - name: Deployment Summary
+        run: |
+          echo "🚀 Deployment complete!"
+          echo "📦 Next.js build completed"
+          echo "🌐 Application deployed to Amplify"

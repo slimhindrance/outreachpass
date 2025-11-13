@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api/client';
 import { CreateEventInput } from '@/types';
 import { useRouter } from 'next/navigation';
@@ -16,11 +16,27 @@ export default function NewEventPage() {
     starts_at: '',
     ends_at: '',
     timezone: 'America/New_York',
-    brand_id: '', // Will need to get from context or API
+    brand_id: '',
     settings_json: {},
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Fetch brands and set default brand
+  const { data: brands } = useQuery<Array<{brand_id: string, display_name: string}>>({
+    queryKey: ['brands'],
+    queryFn: async () => {
+      const response = await apiClient.get<Array<{brand_id: string, display_name: string}>>('/admin/brands');
+      return response;
+    },
+  });
+
+  // Set default brand when brands are loaded
+  useEffect(() => {
+    if (brands && brands.length > 0 && !formData.brand_id) {
+      setFormData(prev => ({ ...prev, brand_id: brands[0].brand_id }));
+    }
+  }, [brands, formData.brand_id]);
 
   const createEventMutation = useMutation({
     mutationFn: async (data: CreateEventInput) => {
@@ -50,13 +66,12 @@ export default function NewEventPage() {
       return;
     }
 
-    // For now, use a placeholder brand_id - this should come from user context
-    const eventData: CreateEventInput = {
-      ...formData as CreateEventInput,
-      brand_id: formData.brand_id || '00000000-0000-0000-0000-000000000000',
-    };
+    if (!formData.brand_id) {
+      setErrors({ submit: 'Brand not loaded. Please refresh the page.' });
+      return;
+    }
 
-    createEventMutation.mutate(eventData);
+    createEventMutation.mutate(formData as CreateEventInput);
   };
 
   const handleChange = (field: keyof CreateEventInput, value: string) => {

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
-  // Basic health check
   const healthCheck = {
     status: 'healthy',
     timestamp: new Date().toISOString(),

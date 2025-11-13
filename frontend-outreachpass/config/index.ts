@@ -1,14 +1,25 @@
+// Environment variable validation helper
+function getRequiredEnvVar(key: string, fallback?: string): string {
+  const value = process.env[key];
+  if (!value && !fallback) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  return value || fallback!;
+}
+
 export const config = {
   api: {
-    baseUrl: process.env.NEXT_PUBLIC_API_URL || 'https://outreachpass.base2ml.com',
+    baseUrl: getRequiredEnvVar('NEXT_PUBLIC_API_URL', 'https://outreachpass.base2ml.com/api/v1'),
   },
   cognito: {
-    userPoolId: process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID || 'us-east-1_SXH934qKt',
-    clientId: process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID || '256e0chtcc14qf8m4knqmobdg0',
-    domain: process.env.NEXT_PUBLIC_COGNITO_DOMAIN || 'outreachpass-dev',
-    region: process.env.NEXT_PUBLIC_AWS_REGION || 'us-east-1',
+    // SECURITY: These must be set via environment variables
+    // Remove hardcoded fallbacks to prevent credential exposure
+    userPoolId: getRequiredEnvVar('NEXT_PUBLIC_COGNITO_USER_POOL_ID'),
+    clientId: getRequiredEnvVar('NEXT_PUBLIC_COGNITO_CLIENT_ID'),
+    domain: getRequiredEnvVar('NEXT_PUBLIC_COGNITO_DOMAIN'),
+    region: getRequiredEnvVar('NEXT_PUBLIC_AWS_REGION', 'us-east-1'),
   },
   app: {
-    url: process.env.NEXT_PUBLIC_APP_URL || 'https://outreachpassapp.base2ml.com',
+    url: getRequiredEnvVar('NEXT_PUBLIC_APP_URL', 'https://outreachpassapp.base2ml.com'),
   },
 } as const;

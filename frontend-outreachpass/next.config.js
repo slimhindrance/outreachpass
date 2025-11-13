@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Amplify Hosting handles deployment
+  // Standalone output for Docker/App Runner deployment
+  output: 'standalone',
   images: {
     unoptimized: true,
   },

@@ -1,7 +1,12 @@
+"use client";
+
 import Link from "next/link";
 import { ArrowRight, QrCode, Users, BarChart3, Smartphone } from "lucide-react";
+import { useAuth } from "@/lib/auth/auth-context";
 
 export default function Home() {
+  const { user, signIn } = useAuth();
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
       {/* Header */}
@@ -18,23 +23,36 @@ export default function Home() {
             <Link href="#how-it-works" className="text-gray-600 hover:text-brand-primary transition">
               How It Works
             </Link>
-            <Link href="/admin" className="text-gray-600 hover:text-brand-primary transition">
-              Admin
-            </Link>
+            {user && (
+              <Link href="/admin" className="text-gray-600 hover:text-brand-primary transition">
+                Admin
+              </Link>
+            )}
           </nav>
           <div className="flex space-x-4">
-            <a
-              href="/attendee/"
-              className="px-4 py-2 text-brand-primary hover:text-brand-primary/80 transition"
-            >
-              Sign In
-            </a>
-            <a
-              href="/admin/dashboard/"
-              className="px-4 py-2 bg-brand-primary text-white rounded-lg hover:bg-brand-primary/90 transition"
-            >
-              Get Started
-            </a>
+            {user ? (
+              <Link
+                href="/admin/dashboard"
+                className="px-4 py-2 bg-brand-primary text-white rounded-lg hover:bg-brand-primary/90 transition"
+              >
+                Dashboard
+              </Link>
+            ) : (
+              <>
+                <button
+                  onClick={() => signIn()}
+                  className="px-4 py-2 text-brand-primary hover:text-brand-primary/80 transition"
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={() => signIn()}
+                  className="px-4 py-2 bg-brand-primary text-white rounded-lg hover:bg-brand-primary/90 transition"
+                >
+                  Get Started
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -50,13 +68,23 @@ export default function Home() {
           Streamline your conference networking with digital contact cards, QR codes, and seamless Apple Wallet integration.
         </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <a
-            href="/admin/dashboard/"
-            className="px-8 py-4 bg-brand-primary text-white rounded-lg hover:bg-brand-primary/90 transition inline-flex items-center justify-center"
-          >
-            Start Your Event
-            <ArrowRight className="ml-2 h-5 w-5" />
-          </a>
+          {user ? (
+            <Link
+              href="/admin/dashboard"
+              className="px-8 py-4 bg-brand-primary text-white rounded-lg hover:bg-brand-primary/90 transition inline-flex items-center justify-center"
+            >
+              Go to Dashboard
+              <ArrowRight className="ml-2 h-5 w-5" />
+            </Link>
+          ) : (
+            <button
+              onClick={() => signIn()}
+              className="px-8 py-4 bg-brand-primary text-white rounded-lg hover:bg-brand-primary/90 transition inline-flex items-center justify-center"
+            >
+              Start Your Event
+              <ArrowRight className="ml-2 h-5 w-5" />
+            </button>
+          )}
           <Link
             href="#how-it-works"
             className="px-8 py-4 border-2 border-brand-primary text-brand-primary rounded-lg hover:bg-brand-primary/5 transition"
@@ -118,13 +146,23 @@ export default function Home() {
           <p className="text-xl mb-8 opacity-90">
             Join thousands of event organizers using OutreachPass
           </p>
-          <a
-            href="/admin/dashboard/"
-            className="px-8 py-4 bg-white text-brand-primary rounded-lg hover:bg-gray-100 transition inline-flex items-center"
-          >
-            Get Started Free
-            <ArrowRight className="ml-2 h-5 w-5" />
-          </a>
+          {user ? (
+            <Link
+              href="/admin/dashboard"
+              className="px-8 py-4 bg-white text-brand-primary rounded-lg hover:bg-gray-100 transition inline-flex items-center"
+            >
+              Go to Dashboard
+              <ArrowRight className="ml-2 h-5 w-5" />
+            </Link>
+          ) : (
+            <button
+              onClick={() => signIn()}
+              className="px-8 py-4 bg-white text-brand-primary rounded-lg hover:bg-gray-100 transition inline-flex items-center"
+            >
+              Get Started Free
+              <ArrowRight className="ml-2 h-5 w-5" />
+            </button>
+          )}
         </div>
       </section>
 
