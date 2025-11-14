@@ -12,12 +12,13 @@ function AuthCallbackContent() {
 
     // Amplify v6 handles OAuth code exchange automatically in the background
     // We just need to redirect to the protected route and let middleware verify auth
-    console.log('[AuthCallback] Redirecting to dashboard...');
+    console.log('[AuthCallback] Waiting for Amplify to process OAuth code...');
 
-    // Small delay to ensure Amplify has processed the OAuth callback
+    // Delay to ensure Amplify has processed the OAuth callback and set session cookies
     const timer = setTimeout(() => {
+      console.log('[AuthCallback] Redirecting to dashboard...');
       router.push('/admin/dashboard');
-    }, 1000);
+    }, 3000);
 
     return () => clearTimeout(timer);
   }, [router]);
