@@ -11,42 +11,60 @@ function AuthCallbackContent() {
 
   useEffect(() => {
     console.log('[AuthCallback] Component mounted');
+    console.log('[AuthCallback] Current URL:', window.location.href);
 
-    // Listen for Hub auth events
-    const unsubscribe = Hub.listen('auth', async ({ payload }) => {
-      console.log('[AuthCallback] Hub event received:', payload.event);
+    let hubUnsubscribe: (() => void) | null = null;
 
-      switch (payload.event) {
-        case 'signInWithRedirect':
-          console.log('[AuthCallback] Sign-in successful, verifying user...');
-          try {
-            const user = await getCurrentUser();
-            console.log('[AuthCallback] User authenticated:', user.username);
-            console.log('[AuthCallback] Redirecting to dashboard');
-            router.push('/admin/dashboard');
-          } catch (error) {
-            console.error('[AuthCallback] Failed to get current user:', error);
+    async function handleCallback() {
+      // Listen for Hub auth events
+      hubUnsubscribe = Hub.listen('auth', async ({ payload }) => {
+        console.log('[AuthCallback] Hub event received:', payload.event);
+
+        switch (payload.event) {
+          case 'signInWithRedirect':
+            console.log('[AuthCallback] Sign-in successful via Hub event');
+            try {
+              const user = await getCurrentUser();
+              console.log('[AuthCallback] User authenticated:', user.username);
+              router.push('/admin/dashboard');
+            } catch (error) {
+              console.error('[AuthCallback] Failed to get current user:', error);
+              setError('Authentication failed. Please try again.');
+              setTimeout(() => router.push('/'), 3000);
+            }
+            break;
+
+          case 'signInWithRedirect_failure':
+            console.error('[AuthCallback] Sign-in failed:', payload.data);
             setError('Authentication failed. Please try again.');
             setTimeout(() => router.push('/'), 3000);
-          }
-          break;
+            break;
+        }
+      });
 
-        case 'signInWithRedirect_failure':
-          console.error('[AuthCallback] Sign-in failed:', payload.data);
-          setError('Authentication failed. Please try again.');
-          setTimeout(() => router.push('/'), 3000);
-          break;
+      // Also try to directly check if user is already authenticated
+      // This handles cases where the Hub event doesn't fire
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-        case 'customOAuthState':
-          console.log('[AuthCallback] Custom OAuth state:', payload.data);
-          break;
+      console.log('[AuthCallback] Checking if user is authenticated...');
+      try {
+        const user = await getCurrentUser();
+        console.log('[AuthCallback] User already authenticated:', user.username);
+        router.push('/admin/dashboard');
+      } catch (error) {
+        console.log('[AuthCallback] User not authenticated yet, waiting for Hub event');
+        // Wait for Hub event to fire
       }
-    });
+    }
+
+    handleCallback();
 
     // Cleanup
     return () => {
-      console.log('[AuthCallback] Cleaning up Hub listener');
-      unsubscribe();
+      if (hubUnsubscribe) {
+        console.log('[AuthCallback] Cleaning up Hub listener');
+        hubUnsubscribe();
+      }
     };
   }, [router]);
 
