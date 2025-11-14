@@ -1,84 +1,26 @@
 "use client";
 
-import { Suspense, useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { Hub } from 'aws-amplify/utils';
-import { getCurrentUser } from 'aws-amplify/auth';
+import { Suspense, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 function AuthCallbackContent() {
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     console.log('[AuthCallback] Component mounted');
     console.log('[AuthCallback] Current URL:', window.location.href);
 
-    let hubUnsubscribe: (() => void) | null = null;
+    // Amplify v6 handles OAuth code exchange automatically in the background
+    // We just need to redirect to the protected route and let middleware verify auth
+    console.log('[AuthCallback] Redirecting to dashboard...');
 
-    async function handleCallback() {
-      // Listen for Hub auth events
-      hubUnsubscribe = Hub.listen('auth', async ({ payload }) => {
-        console.log('[AuthCallback] Hub event received:', payload.event);
+    // Small delay to ensure Amplify has processed the OAuth callback
+    const timer = setTimeout(() => {
+      router.push('/admin/dashboard');
+    }, 1000);
 
-        switch (payload.event) {
-          case 'signInWithRedirect':
-            console.log('[AuthCallback] Sign-in successful via Hub event');
-            try {
-              const user = await getCurrentUser();
-              console.log('[AuthCallback] User authenticated:', user.username);
-              router.push('/admin/dashboard');
-            } catch (error) {
-              console.error('[AuthCallback] Failed to get current user:', error);
-              setError('Authentication failed. Please try again.');
-              setTimeout(() => router.push('/'), 3000);
-            }
-            break;
-
-          case 'signInWithRedirect_failure':
-            console.error('[AuthCallback] Sign-in failed:', payload.data);
-            setError('Authentication failed. Please try again.');
-            setTimeout(() => router.push('/'), 3000);
-            break;
-        }
-      });
-
-      // Also try to directly check if user is already authenticated
-      // This handles cases where the Hub event doesn't fire
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      console.log('[AuthCallback] Checking if user is authenticated...');
-      try {
-        const user = await getCurrentUser();
-        console.log('[AuthCallback] User already authenticated:', user.username);
-        router.push('/admin/dashboard');
-      } catch (error) {
-        console.log('[AuthCallback] User not authenticated yet, waiting for Hub event');
-        // Wait for Hub event to fire
-      }
-    }
-
-    handleCallback();
-
-    // Cleanup
-    return () => {
-      if (hubUnsubscribe) {
-        console.log('[AuthCallback] Cleaning up Hub listener');
-        hubUnsubscribe();
-      }
-    };
+    return () => clearTimeout(timer);
   }, [router]);
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-red-600 mb-4 text-xl">⚠️</div>
-          <p className="text-gray-600">{error}</p>
-          <p className="text-sm text-gray-500 mt-2">Redirecting to home...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex items-center justify-center">
