@@ -1,48 +1,57 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Amplify } from 'aws-amplify';
-import { config } from '@/config';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Hub } from 'aws-amplify/utils';
+import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
 
-// Ensure Amplify is configured for OAuth callback
-Amplify.configure({
-  Auth: {
-    Cognito: {
-      userPoolId: config.cognito.userPoolId,
-      userPoolClientId: config.cognito.clientId,
-      loginWith: {
-        oauth: {
-          domain: config.cognito.domain,
-          scopes: ['email', 'profile', 'openid'],
-          redirectSignIn: [config.app.url],
-          redirectSignOut: [config.app.url],
-          responseType: 'code',
-        },
-      },
-    },
-  },
-}, {
-  ssr: true,
-});
-
-export default function AuthCallback() {
+function AuthCallbackContent() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log('[AuthCallback] Component mounted');
+
     async function handleCallback() {
       try {
-        // Amplify automatically processes the OAuth callback
-        // Wait a moment for the session to be established
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('[AuthCallback] Starting OAuth callback handling');
+        console.log('[AuthCallback] Current URL:', window.location.href);
 
-        // Redirect to admin dashboard after successful auth
-        router.push('/admin/dashboard');
-      } catch (err) {
-        console.error('Auth callback error:', err);
+        // In Amplify v6 with SSR, we need to explicitly trigger token exchange
+        // by calling fetchAuthSession() which processes the OAuth code
+        console.log('[AuthCallback] Fetching auth session to process OAuth code...');
+
+        try {
+          // This call forces Amplify to exchange the OAuth code for tokens
+          const session = await fetchAuthSession({ forceRefresh: true });
+          console.log('[AuthCallback] Session fetched successfully:', {
+            hasTokens: !!session.tokens,
+            hasCredentials: !!session.credentials
+          });
+
+          // Verify user is authenticated
+          const user = await getCurrentUser();
+          console.log('[AuthCallback] User authenticated:', user.username);
+
+          // Success! Redirect to dashboard
+          console.log('[AuthCallback] Redirecting to dashboard');
+          router.push('/admin/dashboard');
+        } catch (e: any) {
+          console.error('[AuthCallback] Authentication failed:', {
+            error: e,
+            message: e.message,
+            name: e.name
+          });
+          setError('Authentication failed. Please try again.');
+          setTimeout(() => router.push('/'), 3000);
+        }
+      } catch (err: any) {
+        console.error('[AuthCallback] Fatal error in callback handler:', {
+          error: err,
+          message: err.message,
+          name: err.name
+        });
         setError('Authentication failed. Please try again.');
-        // Redirect to home page after error
         setTimeout(() => router.push('/'), 3000);
       }
     }
@@ -69,5 +78,20 @@ export default function AuthCallback() {
         <p className="text-gray-600">Signing you in...</p>
       </div>
     </div>
+  );
+}
+
+export default function AuthCallback() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-primary mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <AuthCallbackContent />
+    </Suspense>
   );
 }

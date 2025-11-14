@@ -15,7 +15,7 @@ Amplify.configure({
         oauth: {
           domain: config.cognito.domain,
           scopes: ['email', 'profile', 'openid'],
-          redirectSignIn: [config.app.url],
+          redirectSignIn: [`${config.app.url}/auth/callback`],
           redirectSignOut: [config.app.url],
           responseType: 'code',
         },
@@ -66,7 +66,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signIn() {
     try {
-      await amplifySignIn({ username: '', password: '' }); // OAuth will redirect
+      // Use Amplify's signInWithRedirect for Cognito Hosted UI
+      // No provider param means default redirect to Cognito HostedUI
+      const { signInWithRedirect } = await import('aws-amplify/auth');
+      await signInWithRedirect();
     } catch (error) {
       console.error('Sign in error:', error);
       throw error;
