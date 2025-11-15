@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
+        "https://app.outreachpass.base2ml.com",  # Frontend app
         "https://outreachpass.base2ml.com",
         "https://govsafe.base2ml.com",
         "https://campuscard.base2ml.com",
