@@ -5,6 +5,9 @@ from typing import List, Dict, Any
 import csv
 import io
 import uuid
+import json
+import boto3
+import os
 
 from app.core.database import get_db
 from app.models.database import Event, Attendee, Brand, Tenant, PassGenerationJob
@@ -22,6 +25,10 @@ from app.models.schemas import (
 from app.services.card_service import CardService
 from app.utils.migrations import run_sql_migration, get_database_status
 from app.utils.seed import seed_database
+
+# Initialize SQS client
+sqs = boto3.client('sqs', region_name=os.getenv('AWS_REGION', 'us-east-1'))
+SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/741783034843/outreachpass-pass-generation')
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -300,7 +307,7 @@ async def issue_pass(
     attendee_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    """Generate a pass for an attendee (synchronous)"""
+    """Queue a pass generation job for an attendee"""
 
     # Verify attendee exists
     attendee_result = await db.execute(
@@ -340,50 +347,48 @@ async def issue_pass(
         await db.refresh(job)
         return job
 
+    # Check if there's already a pending/processing job
+    existing_pending = await db.execute(
+        select(PassGenerationJob)
+        .where(PassGenerationJob.attendee_id == attendee_id)
+        .where(PassGenerationJob.status.in_(["pending", "processing"]))
+        .order_by(PassGenerationJob.created_at.desc())
+    )
+    pending_job = existing_pending.scalar_one_or_none()
+
+    if pending_job:
+        return pending_job
+
     # Create pass generation job
     job = PassGenerationJob(
         attendee_id=attendee_id,
         tenant_id=attendee.tenant_id,
-        status="processing"
+        status="pending"
     )
-    job.started_at = job.created_at
 
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
+    # Send message to SQS queue
     try:
-        # Generate pass synchronously using CardService
-        pass_result = await CardService.create_card_for_attendee(
-            db=db,
-            attendee_id=attendee_id
+        sqs.send_message(
+            QueueUrl=SQS_QUEUE_URL,
+            MessageBody=json.dumps({
+                "job_id": str(job.job_id),
+                "attendee_id": str(attendee_id),
+                "tenant_id": str(attendee.tenant_id)
+            })
         )
-
-        if not pass_result:
-            job.status = "failed"
-            job.error_message = "Failed to generate pass"
-            await db.commit()
-            await db.refresh(job)
-            return job
-
-        # Update job with success
-        job.status = "completed"
-        job.card_id = pass_result.card_id
-        job.qr_url = pass_result.qr_url
-        job.completed_at = job.created_at
-
-        await db.commit()
-        await db.refresh(job)
-
-        return job
-
     except Exception as e:
-        # Update job with failure
+        # If SQS fails, mark job as failed
         job.status = "failed"
-        job.error_message = str(e)
+        job.error_message = f"Failed to queue job: {str(e)}"
         await db.commit()
         await db.refresh(job)
-        raise HTTPException(status_code=500, detail=f"Pass generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to queue pass generation: {str(e)}")
+
+    return job
 
 
 @router.get("/passes/jobs/{job_id}", response_model=PassJobStatusResponse)
