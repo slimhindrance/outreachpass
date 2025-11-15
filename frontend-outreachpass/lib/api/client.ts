@@ -1,4 +1,5 @@
 import { config } from '@/config';
+import { fetchAuthSession } from 'aws-amplify/auth';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -27,9 +28,15 @@ class ApiClient {
 
     // Add auth token if available
     if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('authToken');
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+      try {
+        const session = await fetchAuthSession();
+        const token = session.tokens?.idToken?.toString();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+      } catch (error) {
+        // No auth session available - requests will be made without auth
+        console.warn('No auth session available for API request');
       }
     }
 

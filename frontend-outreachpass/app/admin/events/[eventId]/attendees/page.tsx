@@ -61,26 +61,36 @@ export default function EventAttendeesPage() {
   const downloadAttendeeList = () => {
     if (!attendees) return;
 
+    // Helper function to escape CSV fields
+    const escapeCSVField = (field: string) => {
+      if (field.includes(',') || field.includes('"') || field.includes('\n')) {
+        return `"${field.replace(/"/g, '""')}"`;
+      }
+      return field;
+    };
+
     const csvData = [
       ['First Name', 'Last Name', 'Email', 'Phone', 'Organization', 'Title', 'Status'],
       ...attendees.map((a) => [
-        a.first_name || '',
-        a.last_name || '',
-        a.email || '',
-        a.phone || '',
-        a.org_name || '',
-        a.title || '',
+        escapeCSVField(a.first_name || ''),
+        escapeCSVField(a.last_name || ''),
+        escapeCSVField(a.email || ''),
+        escapeCSVField(a.phone || ''),
+        escapeCSVField(a.org_name || ''),
+        escapeCSVField(a.title || ''),
         a.card_id ? 'Pass Issued' : 'Pending',
       ]),
     ];
 
     const csvContent = csvData.map((row) => row.join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `${event?.slug || eventId}-attendees.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
   };
 

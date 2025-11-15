@@ -108,7 +108,7 @@ export default function AttendeeDetailPage() {
   }
 
   const cardUrl = attendee.card_id
-    ? `https://outreachpassapp.base2ml.com/card/${attendee.card_id}`
+    ? `https://app.outreachpass.base2ml.com/card/${attendee.card_id}`
     : '';
 
   return (

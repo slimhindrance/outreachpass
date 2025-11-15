@@ -389,7 +389,7 @@ export default function EventDetailPage() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Event URL: https://outreachpassapp.base2ml.com/e/{event.slug}
+                Event URL: https://app.outreachpass.base2ml.com/e/{event.slug}
               </p>
             </div>
 

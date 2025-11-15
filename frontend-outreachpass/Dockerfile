@@ -22,9 +22,9 @@ RUN npm install
 ARG NEXT_PUBLIC_API_URL=https://outreachpass.base2ml.com/api/v1
 ARG NEXT_PUBLIC_COGNITO_USER_POOL_ID=us-east-1_SXH934qKt
 ARG NEXT_PUBLIC_COGNITO_CLIENT_ID=256e0chtcc14qf8m4knqmobdg0
-ARG NEXT_PUBLIC_COGNITO_DOMAIN=outreachpass-dev
+ARG NEXT_PUBLIC_COGNITO_DOMAIN=outreachpass-dev.auth.us-east-1.amazoncognito.com
 ARG NEXT_PUBLIC_AWS_REGION=us-east-1
-ARG NEXT_PUBLIC_APP_URL=https://outreachpassapp.base2ml.com
+ARG NEXT_PUBLIC_APP_URL=https://app.outreachpass.base2ml.com
 
 # Set as environment variables for build
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
