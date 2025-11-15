@@ -278,6 +278,23 @@ async def list_attendees(
     return attendees
 
 
+@router.get("/attendees/{attendee_id}", response_model=AttendeeResponse)
+async def get_attendee(
+    attendee_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get a single attendee by ID"""
+    result = await db.execute(
+        select(Attendee).where(Attendee.attendee_id == attendee_id)
+    )
+    attendee = result.scalar_one_or_none()
+
+    if not attendee:
+        raise HTTPException(status_code=404, detail="Attendee not found")
+
+    return attendee
+
+
 @router.post("/attendees/{attendee_id}/issue", response_model=PassJobResponse)
 async def issue_pass(
     attendee_id: uuid.UUID,
