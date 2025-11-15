@@ -33,7 +33,7 @@ export default function AttendeeDetailPage() {
 
   const generatePassMutation = useMutation({
     mutationFn: async () => {
-      return await apiClient.post(`/admin/attendees/${attendeeId}/generate-pass`, {});
+      return await apiClient.post(`/admin/attendees/${attendeeId}/issue`, {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['attendee', attendeeId] });
