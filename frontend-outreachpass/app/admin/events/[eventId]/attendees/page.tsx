@@ -58,7 +58,8 @@ export default function EventAttendeesPage() {
     return result;
   };
 
-  const downloadAttendeeList = () => {
+  const downloadAttendeeList = (e?: React.MouseEvent) => {
+    e?.preventDefault();
     if (!attendees) return;
 
     // Helper function to escape CSV fields
@@ -88,6 +89,7 @@ export default function EventAttendeesPage() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `${event?.slug || eventId}-attendees.csv`;
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -133,6 +135,7 @@ export default function EventAttendeesPage() {
           </div>
           <div className="flex gap-3">
             <button
+              type="button"
               onClick={downloadAttendeeList}
               disabled={!attendees || attendees.length === 0}
               className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition disabled:opacity-50 disabled:cursor-not-allowed"

@@ -47,7 +47,8 @@ export function CSVImport({ onImport, templateColumns, isOpen, onClose }: CSVImp
     }
   };
 
-  const downloadTemplate = () => {
+  const downloadTemplate = (e?: React.MouseEvent) => {
+    e?.preventDefault();
     if (!templateColumns) return;
 
     const csvContent = templateColumns.join(',');
@@ -56,6 +57,7 @@ export function CSVImport({ onImport, templateColumns, isOpen, onClose }: CSVImp
     const a = document.createElement('a');
     a.href = url;
     a.download = 'attendees_template.csv';
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -85,6 +87,7 @@ export function CSVImport({ onImport, templateColumns, isOpen, onClose }: CSVImp
                 Download the CSV template to ensure your file has the correct format
               </p>
               <button
+                type="button"
                 onClick={downloadTemplate}
                 className="text-sm text-brand-primary hover:text-brand-primary/80 font-medium"
               >
