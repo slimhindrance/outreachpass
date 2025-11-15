@@ -300,7 +300,7 @@ async def issue_pass(
     attendee_id: uuid.UUID,
     db: AsyncSession = Depends(get_db)
 ):
-    """Queue a pass generation job for an attendee"""
+    """Generate a pass for an attendee (synchronous)"""
 
     # Verify attendee exists
     attendee_result = await db.execute(
@@ -311,18 +311,79 @@ async def issue_pass(
     if not attendee:
         raise HTTPException(status_code=404, detail="Attendee not found")
 
+    # Check if pass already exists
+    if attendee.card_id:
+        # Return existing job or create completed job record
+        existing_job = await db.execute(
+            select(PassGenerationJob)
+            .where(PassGenerationJob.attendee_id == attendee_id)
+            .where(PassGenerationJob.status == "completed")
+            .order_by(PassGenerationJob.created_at.desc())
+        )
+        job = existing_job.scalar_one_or_none()
+
+        if job:
+            return job
+
+        # Create completed job record for existing pass
+        job = PassGenerationJob(
+            attendee_id=attendee_id,
+            tenant_id=attendee.tenant_id,
+            status="completed",
+            card_id=attendee.card_id
+        )
+        job.started_at = job.created_at
+        job.completed_at = job.created_at
+
+        db.add(job)
+        await db.commit()
+        await db.refresh(job)
+        return job
+
     # Create pass generation job
     job = PassGenerationJob(
         attendee_id=attendee_id,
         tenant_id=attendee.tenant_id,
-        status="pending"
+        status="processing"
     )
+    job.started_at = job.created_at
 
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
-    return job
+    try:
+        # Generate pass synchronously using CardService
+        pass_result = await CardService.create_card_for_attendee(
+            db=db,
+            attendee_id=attendee_id
+        )
+
+        if not pass_result:
+            job.status = "failed"
+            job.error_message = "Failed to generate pass"
+            await db.commit()
+            await db.refresh(job)
+            return job
+
+        # Update job with success
+        job.status = "completed"
+        job.card_id = pass_result.card_id
+        job.qr_url = pass_result.qr_url
+        job.completed_at = job.created_at
+
+        await db.commit()
+        await db.refresh(job)
+
+        return job
+
+    except Exception as e:
+        # Update job with failure
+        job.status = "failed"
+        job.error_message = str(e)
+        await db.commit()
+        await db.refresh(job)
+        raise HTTPException(status_code=500, detail=f"Pass generation failed: {str(e)}")
 
 
 @router.get("/passes/jobs/{job_id}", response_model=PassJobStatusResponse)
