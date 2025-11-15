@@ -14,8 +14,19 @@ function AuthCallbackContent() {
       try {
         console.log('[AuthCallback] Processing OAuth code exchange...');
 
-        // Import Amplify auth dynamically to ensure configuration is loaded
-        const { signInWithRedirect } = await import('aws-amplify/auth');
+        // Import Amplify auth dynamically
+        const { signInWithRedirect, getCurrentUser } = await import('aws-amplify/auth');
+
+        // Check if user is already authenticated
+        try {
+          const user = await getCurrentUser();
+          console.log('[AuthCallback] User already authenticated:', user.username);
+          router.push('/admin/dashboard');
+          return;
+        } catch (error) {
+          // User not authenticated yet, continue with OAuth flow
+          console.log('[AuthCallback] User not authenticated, processing OAuth code...');
+        }
 
         // Call signInWithRedirect() to complete the OAuth flow
         // This processes the code parameter and exchanges it for tokens
