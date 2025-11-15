@@ -143,7 +143,11 @@ export default function AttendeesPage() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredAttendees.map((attendee) => (
-                <tr key={attendee.attendee_id} className="hover:bg-gray-50">
+                <tr
+                  key={attendee.attendee_id}
+                  onClick={() => window.location.href = `/admin/attendees/${attendee.attendee_id}`}
+                  className="hover:bg-gray-50 cursor-pointer"
+                >
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">
                       {attendee.first_name} {attendee.last_name}
