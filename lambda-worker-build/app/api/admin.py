@@ -5,6 +5,9 @@ from typing import List, Dict, Any
 import csv
 import io
 import uuid
+import json
+import boto3
+import os
 
 from app.core.database import get_db
 from app.models.database import Event, Attendee, Brand, Tenant, PassGenerationJob
@@ -22,6 +25,16 @@ from app.models.schemas import (
 from app.services.card_service import CardService
 from app.utils.migrations import run_sql_migration, get_database_status
 from app.utils.seed import seed_database
+
+# Initialize SQS client with timeout configuration
+from botocore.config import Config
+sqs_config = Config(
+    connect_timeout=5,
+    read_timeout=5,
+    retries={'max_attempts': 2}
+)
+sqs = boto3.client('sqs', region_name=os.getenv('AWS_REGION', 'us-east-1'), config=sqs_config)
+SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/741783034843/outreachpass-pass-generation')
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -177,7 +190,29 @@ async def import_attendees(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
-    """Import attendees from CSV"""
+    """Import attendees from CSV with validation
+    
+    Limits:
+    - Max file size: 5MB
+    - Max rows: 10,000
+    """
+    
+    # SECURITY: Validate file size (5MB limit)
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+    MAX_ROWS = 10000
+    
+    # Read file with size check
+    contents = await file.read()
+    file_size = len(contents)
+    
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_FILE_SIZE / (1024 * 1024):.1f}MB"
+        )
+    
+    if file_size == 0:
+        raise HTTPException(status_code=400, detail="Empty file uploaded")
 
     # Verify event exists
     event_result = await db.execute(
@@ -188,15 +223,28 @@ async def import_attendees(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    # Read CSV
-    contents = await file.read()
-    csv_data = io.StringIO(contents.decode('utf-8'))
-    reader = csv.DictReader(csv_data)
+    # Parse CSV
+    try:
+        csv_data = io.StringIO(contents.decode('utf-8'))
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid file encoding. Please use UTF-8")
+    
+    try:
+        reader = csv.DictReader(csv_data)
+    except csv.Error as e:
+        raise HTTPException(status_code=400, detail=f"Invalid CSV format: {str(e)}")
 
     imported = 0
     errors = []
 
-    for row in reader:
+    for row_num, row in enumerate(reader, start=2):  # Start at 2 (header is line 1)
+        # SECURITY: Enforce row limit
+        if row_num - 1 > MAX_ROWS:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Too many rows. Maximum is {MAX_ROWS:,} rows"
+            )
+        
         try:
             # Map CSV columns to attendee fields
             flags_json = {}
@@ -220,7 +268,7 @@ async def import_attendees(
             imported += 1
 
         except Exception as e:
-            errors.append(f"Row error: {str(e)}")
+            errors.append(f"Row {row_num}: {str(e)}")
 
     await db.commit()
 
@@ -243,6 +291,23 @@ async def list_attendees(
     return attendees
 
 
+@router.get("/attendees/{attendee_id}", response_model=AttendeeResponse)
+async def get_attendee(
+    attendee_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get a single attendee by ID"""
+    result = await db.execute(
+        select(Attendee).where(Attendee.attendee_id == attendee_id)
+    )
+    attendee = result.scalar_one_or_none()
+
+    if not attendee:
+        raise HTTPException(status_code=404, detail="Attendee not found")
+
+    return attendee
+
+
 @router.post("/attendees/{attendee_id}/issue", response_model=PassJobResponse)
 async def issue_pass(
     attendee_id: uuid.UUID,
@@ -259,6 +324,47 @@ async def issue_pass(
     if not attendee:
         raise HTTPException(status_code=404, detail="Attendee not found")
 
+    # Check if pass already exists
+    if attendee.card_id:
+        # Return existing job or create completed job record
+        existing_job = await db.execute(
+            select(PassGenerationJob)
+            .where(PassGenerationJob.attendee_id == attendee_id)
+            .where(PassGenerationJob.status == "completed")
+            .order_by(PassGenerationJob.created_at.desc())
+        )
+        job = existing_job.scalar_one_or_none()
+
+        if job:
+            return job
+
+        # Create completed job record for existing pass
+        job = PassGenerationJob(
+            attendee_id=attendee_id,
+            tenant_id=attendee.tenant_id,
+            status="completed",
+            card_id=attendee.card_id
+        )
+        job.started_at = job.created_at
+        job.completed_at = job.created_at
+
+        db.add(job)
+        await db.commit()
+        await db.refresh(job)
+        return job
+
+    # Check if there's already a pending/processing job
+    existing_pending = await db.execute(
+        select(PassGenerationJob)
+        .where(PassGenerationJob.attendee_id == attendee_id)
+        .where(PassGenerationJob.status.in_(["pending", "processing"]))
+        .order_by(PassGenerationJob.created_at.desc())
+    )
+    pending_job = existing_pending.scalar_one_or_none()
+
+    if pending_job:
+        return pending_job
+
     # Create pass generation job
     job = PassGenerationJob(
         attendee_id=attendee_id,
@@ -269,6 +375,24 @@ async def issue_pass(
     db.add(job)
     await db.commit()
     await db.refresh(job)
+
+    # Send message to SQS queue
+    try:
+        sqs.send_message(
+            QueueUrl=SQS_QUEUE_URL,
+            MessageBody=json.dumps({
+                "job_id": str(job.job_id),
+                "attendee_id": str(attendee_id),
+                "tenant_id": str(attendee.tenant_id)
+            })
+        )
+    except Exception as e:
+        # If SQS fails, mark job as failed
+        job.status = "failed"
+        job.error_message = f"Failed to queue job: {str(e)}"
+        await db.commit()
+        await db.refresh(job)
+        raise HTTPException(status_code=500, detail=f"Failed to queue pass generation: {str(e)}")
 
     return job
 

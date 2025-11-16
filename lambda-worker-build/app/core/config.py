@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
+        "https://app.outreachpass.base2ml.com",  # Frontend app
         "https://outreachpass.base2ml.com",
         "https://govsafe.base2ml.com",
         "https://campuscard.base2ml.com",
@@ -49,6 +50,26 @@ class Settings(BaseSettings):
         "GOVSAFE": "https://govsafe.base2ml.com",
         "CAMPUSCARD": "https://campuscard.base2ml.com"
     }
+
+    # Apple Wallet Configuration
+    APPLE_WALLET_ENABLED: bool = False  # Disabled until Apple Developer credentials available
+    APPLE_WALLET_TEAM_ID: Optional[str] = None
+    APPLE_WALLET_PASS_TYPE_ID: Optional[str] = None
+    APPLE_WALLET_ORGANIZATION_NAME: str = "OutreachPass"
+    APPLE_WALLET_CERT_PATH: Optional[str] = None
+    APPLE_WALLET_KEY_PATH: Optional[str] = None
+    APPLE_WALLET_WWDR_CERT_PATH: Optional[str] = None
+
+    # Google Wallet Configuration
+    GOOGLE_WALLET_ENABLED: bool = True
+    GOOGLE_WALLET_ISSUER_ID: Optional[str] = None  # Google Cloud Project numeric ID
+    GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL: Optional[str] = None
+    GOOGLE_WALLET_SERVICE_ACCOUNT_FILE: Optional[str] = None  # Path to JSON key file
+    GOOGLE_WALLET_ORIGINS: list[str] = [
+        "https://outreachpass.base2ml.com",
+        "https://govsafe.base2ml.com",
+        "https://campuscard.base2ml.com"
+    ]
 
     class Config:
         env_file = ".env"

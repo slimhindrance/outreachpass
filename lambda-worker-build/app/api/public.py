@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, text
 from datetime import date
 import uuid
 
@@ -21,31 +21,37 @@ async def get_card_page(
 ):
     """Render public contact card page"""
 
-    # Get card
+    # Get card with attendee to get event_id
     result = await db.execute(
-        select(Card).where(Card.card_id == card_id)
+        select(Card, Attendee)
+        .join(Attendee, Card.owner_attendee_id == Attendee.attendee_id, isouter=True)
+        .where(Card.card_id == card_id)
     )
-    card = result.scalar_one_or_none()
+    row = result.first()
 
-    if not card:
+    if not row:
         raise HTTPException(status_code=404, detail="Card not found")
 
-    # Track scan (aggregate only)
-    today = date.today()
-    await db.execute(
-        """
-        INSERT INTO scans_daily (day, tenant_id, event_id, card_id, scan_count, vcard_downloads)
-        VALUES (:day, :tenant_id, NULL, :card_id, 1, 0)
-        ON CONFLICT (day, tenant_id, event_id, card_id)
-        DO UPDATE SET scan_count = scans_daily.scan_count + 1
-        """,
-        {
-            "day": today,
-            "tenant_id": card.tenant_id,
-            "card_id": card.card_id
-        }
-    )
-    await db.commit()
+    card, attendee = row
+
+    # Track scan (aggregate only) - only if we have an event_id
+    if attendee and attendee.event_id:
+        today = date.today()
+        await db.execute(
+            text("""
+            INSERT INTO scans_daily (day, tenant_id, event_id, card_id, scan_count, vcard_downloads)
+            VALUES (:day, :tenant_id, :event_id, :card_id, 1, 0)
+            ON CONFLICT (day, tenant_id, event_id, card_id)
+            DO UPDATE SET scan_count = scans_daily.scan_count + 1
+            """),
+            {
+                "day": today,
+                "tenant_id": card.tenant_id,
+                "event_id": attendee.event_id,
+                "card_id": card.card_id
+            }
+        )
+        await db.commit()
 
     # Build simple HTML response
     links_html = ""
@@ -138,31 +144,37 @@ async def download_vcard(
 ):
     """Download VCard file"""
 
-    # Get card
+    # Get card with attendee to get event_id
     result = await db.execute(
-        select(Card).where(Card.card_id == card_id)
+        select(Card, Attendee)
+        .join(Attendee, Card.owner_attendee_id == Attendee.attendee_id, isouter=True)
+        .where(Card.card_id == card_id)
     )
-    card = result.scalar_one_or_none()
+    row = result.first()
 
-    if not card:
+    if not row:
         raise HTTPException(status_code=404, detail="Card not found")
 
-    # Track download
-    today = date.today()
-    await db.execute(
-        """
-        INSERT INTO scans_daily (day, tenant_id, event_id, card_id, scan_count, vcard_downloads)
-        VALUES (:day, :tenant_id, NULL, :card_id, 0, 1)
-        ON CONFLICT (day, tenant_id, event_id, card_id)
-        DO UPDATE SET vcard_downloads = scans_daily.vcard_downloads + 1
-        """,
-        {
-            "day": today,
-            "tenant_id": card.tenant_id,
-            "card_id": card.card_id
-        }
-    )
-    await db.commit()
+    card, attendee = row
+
+    # Track download - only if we have an event_id
+    if attendee and attendee.event_id:
+        today = date.today()
+        await db.execute(
+            text("""
+            INSERT INTO scans_daily (day, tenant_id, event_id, card_id, scan_count, vcard_downloads)
+            VALUES (:day, :tenant_id, :event_id, :card_id, 0, 1)
+            ON CONFLICT (day, tenant_id, event_id, card_id)
+            DO UPDATE SET vcard_downloads = scans_daily.vcard_downloads + 1
+            """),
+            {
+                "day": today,
+                "tenant_id": card.tenant_id,
+                "event_id": attendee.event_id,
+                "card_id": card.card_id
+            }
+        )
+        await db.commit()
 
     # Generate VCard
     vcard_str = generate_vcard(

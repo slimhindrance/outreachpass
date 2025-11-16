@@ -1,4 +1,5 @@
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from typing import Optional
 from app.core.config import settings
@@ -8,7 +9,13 @@ class S3Client:
     """S3 operations wrapper"""
 
     def __init__(self):
-        self.s3 = boto3.client('s3', region_name=settings.AWS_REGION)
+        # Configure S3 client with timeout to prevent Lambda timeouts
+        s3_config = Config(
+            connect_timeout=5,
+            read_timeout=30,  # S3 uploads might take longer
+            retries={'max_attempts': 2}
+        )
+        self.s3 = boto3.client('s3', region_name=settings.AWS_REGION, config=s3_config)
         self.assets_bucket = settings.S3_BUCKET_ASSETS
         self.uploads_bucket = settings.S3_BUCKET_UPLOADS
 

@@ -115,11 +115,19 @@ class PassIssuanceRequest(BaseModel):
     include_wallet: bool = False
 
 
+# Wallet Pass Schemas
+class WalletPass(BaseModel):
+    """Digital wallet pass (Apple Wallet, Google Wallet, etc.)"""
+    type: str  # "apple" or "google"
+    url: str  # Public download URL
+    s3_key: Optional[str] = None  # S3 storage key
+
+
 class PassIssuanceResponse(BaseModel):
     card_id: UUID4
     qr_url: str
     qr_s3_key: Optional[str]
-    wallet_passes: list[str] = []
+    wallet_passes: list[WalletPass] = []
 
 
 # Pass Generation Job Schemas

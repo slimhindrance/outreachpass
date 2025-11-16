@@ -92,9 +92,18 @@ resource "aws_lambda_function" "api" {
       COGNITO_USER_POOL_ID  = var.cognito_user_pool_id
       COGNITO_CLIENT_ID     = var.cognito_client_id
       COGNITO_REGION        = data.aws_region.current.name
-      SES_FROM_EMAIL        = var.ses_from_email
+      SES_FROM_EMAIL        = "outreachpass@base2ml.com"
       SES_REGION            = data.aws_region.current.name
       SECRET_KEY            = random_password.secret_key.result
+
+      # Google Wallet Configuration
+      GOOGLE_WALLET_ENABLED                = "true"
+      GOOGLE_WALLET_ISSUER_ID              = "3388000000023042612"
+      GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL  = "outreach-pass@outreachpass.iam.gserviceaccount.com"
+      GOOGLE_WALLET_SERVICE_ACCOUNT_FILE   = "/var/task/google-wallet-credentials.json"
+
+      # Apple Wallet Configuration (disabled until credentials available)
+      APPLE_WALLET_ENABLED = "false"
     }
   }
 

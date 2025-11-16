@@ -26,8 +26,14 @@ from app.services.card_service import CardService
 from app.utils.migrations import run_sql_migration, get_database_status
 from app.utils.seed import seed_database
 
-# Initialize SQS client
-sqs = boto3.client('sqs', region_name=os.getenv('AWS_REGION', 'us-east-1'))
+# Initialize SQS client with timeout configuration
+from botocore.config import Config
+sqs_config = Config(
+    connect_timeout=5,
+    read_timeout=5,
+    retries={'max_attempts': 2}
+)
+sqs = boto3.client('sqs', region_name=os.getenv('AWS_REGION', 'us-east-1'), config=sqs_config)
 SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/741783034843/outreachpass-pass-generation')
 
 
