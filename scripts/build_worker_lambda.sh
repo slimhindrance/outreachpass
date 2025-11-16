@@ -11,6 +11,7 @@ mkdir -p lambda-worker-build
 echo "📦 Copying application code..."
 cp -r backend/app lambda-worker-build/
 cp backend/worker.py lambda-worker-build/
+cp backend/google-wallet-credentials.json lambda-worker-build/
 
 # Install dependencies for Linux Lambda runtime
 echo "📥 Installing dependencies for linux/amd64 Lambda runtime..."
