@@ -79,3 +79,4 @@ secrets/
 backend/google-wallet-credentials.json
 backend/apple-wallet-*.pem
 backend/*-credentials.json
+*.json
