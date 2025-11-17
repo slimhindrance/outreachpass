@@ -65,11 +65,7 @@ class Settings(BaseSettings):
     GOOGLE_WALLET_ISSUER_ID: Optional[str] = None  # Google Cloud Project numeric ID
     GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL: Optional[str] = None
     GOOGLE_WALLET_SERVICE_ACCOUNT_FILE: Optional[str] = None  # Path to JSON key file
-    GOOGLE_WALLET_ORIGINS: list[str] = [
-        "https://outreachpass.base2ml.com",
-        "https://govsafe.base2ml.com",
-        "https://campuscard.base2ml.com"
-    ]
+    GOOGLE_WALLET_ORIGINS: list[str] = []  # Empty by default for email compatibility
 
     class Config:
         env_file = ".env"

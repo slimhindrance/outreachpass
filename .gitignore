@@ -53,6 +53,7 @@ tfplan
 *.zip
 terraform/modules/lambda/lambda.zip
 terraform/modules/lambda/layers/
+lambda-worker-build/
 
 # Node
 node_modules/
@@ -79,4 +80,5 @@ secrets/
 backend/google-wallet-credentials.json
 backend/apple-wallet-*.pem
 backend/*-credentials.json
-*.json
+outreachpass-*.json
+*.json.terraform/

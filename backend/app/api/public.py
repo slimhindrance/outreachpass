@@ -6,9 +6,10 @@ from datetime import date
 import uuid
 
 from app.core.database import get_db
-from app.models.database import Card, ScanDaily, Event, Attendee
+from app.models.database import Card, ScanDaily, Event, Attendee, QRCode
 from app.models.schemas import CardResponse
 from app.utils.vcard import generate_vcard
+from app.utils.s3 import s3_client
 
 
 router = APIRouter(tags=["public"])
@@ -197,6 +198,38 @@ async def download_vcard(
             "Content-Disposition": f'attachment; filename="{filename}"'
         }
     )
+
+
+@router.get("/qr/{card_id}")
+async def get_qr_code(
+    card_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get QR code PNG image for a card"""
+
+    # Get QR code record
+    result = await db.execute(
+        select(QRCode).where(QRCode.card_id == card_id)
+    )
+    qr_code = result.scalar_one_or_none()
+
+    if not qr_code or not qr_code.s3_key_png:
+        raise HTTPException(status_code=404, detail="QR code not found")
+
+    # Fetch from S3
+    try:
+        png_bytes = s3_client.get_file(qr_code.s3_key_png)
+
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=86400",  # Cache for 1 day
+                "Content-Type": "image/png"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve QR code: {str(e)}")
 
 
 @router.get("/api/cards/{card_id}", response_model=CardResponse)

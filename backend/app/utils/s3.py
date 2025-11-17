@@ -60,6 +60,19 @@ class S3Client:
             print(f"Pre-signed URL error: {e}")
             return None
 
+    def get_file(
+        self,
+        key: str,
+        bucket: Optional[str] = None
+    ) -> bytes:
+        """Get file from S3"""
+        try:
+            bucket = bucket or self.assets_bucket
+            response = self.s3.get_object(Bucket=bucket, Key=key)
+            return response['Body'].read()
+        except ClientError as e:
+            raise Exception(f"S3 get error: {e}")
+
     def delete_file(
         self,
         key: str,

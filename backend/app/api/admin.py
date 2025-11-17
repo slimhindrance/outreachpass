@@ -8,6 +8,9 @@ import uuid
 import json
 import boto3
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
 from app.models.database import Event, Attendee, Brand, Tenant, PassGenerationJob
@@ -360,7 +363,7 @@ async def issue_pass(
         .where(PassGenerationJob.status.in_(["pending", "processing"]))
         .order_by(PassGenerationJob.created_at.desc())
     )
-    pending_job = existing_pending.scalar_one_or_none()
+    pending_job = existing_pending.scalars().first()
 
     if pending_job:
         return pending_job
@@ -378,7 +381,8 @@ async def issue_pass(
 
     # Send message to SQS queue
     try:
-        sqs.send_message(
+        logger.info(f"Sending SQS message for job {job.job_id} to queue {SQS_QUEUE_URL}")
+        response = sqs.send_message(
             QueueUrl=SQS_QUEUE_URL,
             MessageBody=json.dumps({
                 "job_id": str(job.job_id),
@@ -386,6 +390,7 @@ async def issue_pass(
                 "tenant_id": str(attendee.tenant_id)
             })
         )
+        logger.info(f"SQS message sent successfully: MessageId={response.get('MessageId')}")
     except Exception as e:
         # If SQS fails, mark job as failed
         job.status = "failed"
