@@ -91,7 +91,7 @@ class GoogleWalletPassGenerator:
                         "value": event_name
                     }
                 },
-                "reviewStatus": "DRAFT",  # DRAFT allows testing without authorized tester requirements
+                "reviewStatus": "UNDER_REVIEW",  # Will auto-transition to APPROVED for approved issuer accounts
                 "textModulesData": [
                     {
                         "id": "contact_card_info",
