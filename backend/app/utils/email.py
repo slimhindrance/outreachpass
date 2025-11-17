@@ -1,11 +1,14 @@
 import logging
 import boto3
+import os
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from typing import Optional, List
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Google Wallet button now uses styled HTML button instead of image
 
 
 class EmailClient:
@@ -119,8 +122,8 @@ The OutreachPass Team
                 elif wallet_pass.type == "google":
                     wallet_buttons += f"""
     <p style="margin-top: 20px;">
-        <a href="{wallet_pass.url}">
-            <img src="https://pay.google.com/gp/p/generate_button?c=save" alt="Add to Google Wallet" style="height: 48px;">
+        <a href="{wallet_pass.url}" style="background-color: #1a73e8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-family: Arial, sans-serif;">
+            📱 Add to Google Wallet
         </a>
     </p>"""
 
@@ -146,6 +149,11 @@ The OutreachPass Team
         </a>
     </p>
     {wallet_buttons}{vcard_button}
+    <div style="margin-top: 40px; text-align: center; padding: 20px; background-color: #f5f5f5; border-radius: 8px;">
+        <h3 style="color: #333; margin-bottom: 15px;">Your Contact QR Code</h3>
+        <p style="font-size: 14px; color: #666; margin-bottom: 15px;">Share this QR code so others can save your contact info instantly</p>
+        <img src="{qr_url}" alt="Contact QR Code" style="width: 250px; height: 250px; border: 2px solid #ddd; border-radius: 8px;" />
+    </div>
     <p style="margin-top: 30px; font-size: 14px; color: #777;">Share your contact info instantly by showing your QR code or sharing your link.</p>
     <p style="margin-top: 30px; color: #666; font-size: 14px;">Best regards,<br/>The OutreachPass Team</p>
 </body>
