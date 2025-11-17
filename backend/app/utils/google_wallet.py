@@ -236,7 +236,15 @@ class GoogleWalletPassGenerator:
         object_id: str
     ) -> str:
         """
-        Generate a "Save to Google Wallet" link using JWT
+        Generate a "Save to Google Wallet" link for a pre-created pass object
+
+        Since we pre-create the pass object via REST API, we use the simple
+        object ID URL format instead of JWT. This is the recommended approach
+        for email-based save links as it:
+        - Keeps pass data private (not exposed in URL)
+        - Avoids JWT token length limits
+        - No need for origins field configuration
+        - Simpler and more reliable
 
         Args:
             class_id: Pass class ID
@@ -248,44 +256,10 @@ class GoogleWalletPassGenerator:
         try:
             full_object_id = f"{self.issuer_id}.{object_id}"
 
-            # Create JWT payload with the pass object
-            current_time = int(time.time())
-            payload = {
-                "iss": self.service_account_email,
-                "aud": "google",
-                "typ": "savetowallet",
-                "iat": current_time,  # Issued at time (REQUIRED by Google Wallet API)
-                "exp": current_time + 3600,  # Expires in 1 hour
-                "payload": {
-                    "eventTicketObjects": [
-                        {
-                            "id": full_object_id
-                        }
-                    ]
-                }
-            }
-
-            # Only add origins if provided and not empty (for email-based buttons, omit origins)
-            if self.origins:
-                payload["origins"] = self.origins
-
-            logger.info(f"Creating Google Wallet JWT for object {full_object_id}")
-            logger.debug(f"JWT payload: iss={self.service_account_email}, iat={current_time}, exp={current_time + 3600}")
-
-            # Sign the JWT if credentials are available
-            if self.credentials:
-                # Use the service account private key to sign
-                signer = crypt.RSASigner.from_service_account_file(self.service_account_file)
-                token = jwt.encode(signer, payload)
-                logger.info(f"Google Wallet JWT signed successfully (token length: {len(token)} chars)")
-            else:
-                # For development without credentials, create unsigned token
-                logger.warning("No credentials - creating unsigned JWT (won't work in production)")
-                token = json.dumps(payload)
-
-            # Generate the save URL
-            save_url = f"https://pay.google.com/gp/v/save/{token}"
-            logger.info(f"Generated Google Wallet save URL for {full_object_id}")
+            # For pre-created pass objects, use the direct object ID URL format
+            # Reference: https://developers.google.com/wallet/generic/use-cases/jwt
+            save_url = f"https://pay.google.com/gp/v/save/{full_object_id}"
+            logger.info(f"Generated Google Wallet save URL for pre-created object {full_object_id}")
 
             return save_url
 
