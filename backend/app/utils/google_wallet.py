@@ -208,7 +208,13 @@ class GoogleWalletPassGenerator:
             )
 
             if response.status_code == 200:
+                response_data = response.json() if response.text else {}
                 logger.info(f"Created event pass object: {full_object_id}")
+                logger.info(f"Google API response: {response_data}")
+                # Check if object state is ACTIVE
+                state = response_data.get('state', 'UNKNOWN')
+                if state != 'ACTIVE':
+                    logger.warning(f"Pass object state is {state}, not ACTIVE. This may prevent users from adding it.")
                 return full_object_id
             elif response.status_code == 409:
                 # Object already exists - update it
@@ -218,6 +224,8 @@ class GoogleWalletPassGenerator:
                     json=object_resource
                 )
                 if response.status_code == 200:
+                    response_data = response.json() if response.text else {}
+                    logger.info(f"Updated pass object. State: {response_data.get('state', 'UNKNOWN')}")
                     return full_object_id
                 else:
                     logger.error(f"Failed to update pass object: {response.status_code} - {response.text}")
