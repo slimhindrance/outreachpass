@@ -256,7 +256,6 @@ class GoogleWalletPassGenerator:
                 "typ": "savetowallet",
                 "iat": current_time,  # Issued at time (REQUIRED by Google Wallet API)
                 "exp": current_time + 3600,  # Expires in 1 hour
-                "origins": self.origins,
                 "payload": {
                     "eventTicketObjects": [
                         {
@@ -265,6 +264,10 @@ class GoogleWalletPassGenerator:
                     ]
                 }
             }
+
+            # Only add origins if provided and not empty (for email-based buttons, omit origins)
+            if self.origins:
+                payload["origins"] = self.origins
 
             logger.info(f"Creating Google Wallet JWT for object {full_object_id}")
             logger.debug(f"JWT payload: iss={self.service_account_email}, iat={current_time}, exp={current_time + 3600}")
