@@ -84,6 +84,7 @@ class GoogleWalletPassGenerator:
 
             class_resource = {
                 "id": full_class_id,
+                "eventId": full_class_id,  # Required field - unique identifier for the event
                 "issuerName": organization_name,
                 "eventName": {
                     "defaultValue": {
@@ -244,37 +245,65 @@ class GoogleWalletPassGenerator:
         object_id: str
     ) -> str:
         """
-        Generate a "Save to Google Wallet" link for a pre-created pass object
+        Generate a "Save to Google Wallet" JWT-signed link for a pre-created pass object
 
-        Since we pre-create the pass object via REST API, we use the simple
-        object ID URL format instead of JWT. This is the recommended approach
-        for email-based save links as it:
-        - Keeps pass data private (not exposed in URL)
-        - Avoids JWT token length limits
-        - No need for origins field configuration
-        - Simpler and more reliable
+        Google Wallet requires ALL save URLs to use signed JWT tokens, even when
+        referencing pre-created objects. The JWT contains a reference to the object
+        ID, and Google validates the signature before allowing the user to save.
+
+        For pre-created objects, the JWT payload is minimal - just a reference to
+        the object ID. This keeps the token small while maintaining security.
+
+        CRITICAL: Do NOT include 'origins' field for email-based links - it will
+        cause validation errors.
 
         Args:
             class_id: Pass class ID
             object_id: Pass object ID
 
         Returns:
-            URL that users can click to add the pass to Google Wallet
+            JWT-signed URL that users can click to add the pass to Google Wallet
         """
         try:
             full_object_id = f"{self.issuer_id}.{object_id}"
 
-            # For pre-created pass objects, use the direct object ID URL format
-            # Reference: https://developers.google.com/wallet/generic/use-cases/jwt
-            save_url = f"https://pay.google.com/gp/v/save/{full_object_id}"
-            logger.info(f"Generated Google Wallet save URL for pre-created object {full_object_id}")
+            # Create JWT payload with reference to pre-created object
+            current_time = int(time.time())
+            payload = {
+                "iss": self.service_account_email,
+                "aud": "google",
+                "typ": "savetowallet",
+                "iat": current_time,
+                "exp": current_time + 3600,  # Token valid for 1 hour
+                # Reference the pre-created pass object
+                "payload": {
+                    "eventTicketObjects": [
+                        {
+                            "id": full_object_id
+                        }
+                    ]
+                }
+            }
+            # IMPORTANT: Do NOT include 'origins' field for email-based links
+
+            # Sign the JWT with service account credentials
+            if not self.credentials:
+                logger.error("No credentials available for JWT signing")
+                return f"https://pay.google.com/gp/v/save/{full_object_id}"
+
+            signer = crypt.RSASigner.from_service_account_file(self.service_account_file)
+            token = jwt.encode(signer, payload)
+
+            save_url = f"https://pay.google.com/gp/v/save/{token}"
+            logger.info(f"Generated JWT-signed Google Wallet save URL for object {full_object_id}")
+            logger.info(f"JWT token length: {len(token)} characters")
 
             return save_url
 
         except Exception as e:
             logger.error(f"Error generating Google Wallet save URL: {str(e)}", exc_info=True)
-            # Return a placeholder URL if generation fails
-            return f"https://pay.google.com/gp/v/object/{self.issuer_id}.{object_id}"
+            # Fallback to direct object ID URL (will likely fail, but provides debugging info)
+            return f"https://pay.google.com/gp/v/save/{self.issuer_id}.{object_id}"
 
 
 # Global instance (will be configured from settings)
