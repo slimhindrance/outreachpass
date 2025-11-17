@@ -12,6 +12,7 @@ Key concepts:
 import logging
 import json
 import uuid
+import time
 from typing import Optional, Dict, Any
 from datetime import datetime
 from google.auth import jwt, crypt
@@ -90,7 +91,7 @@ class GoogleWalletPassGenerator:
                         "value": event_name
                     }
                 },
-                "reviewStatus": "UNDER_REVIEW",
+                "reviewStatus": "DRAFT",  # DRAFT allows testing without authorized tester requirements
                 "textModulesData": [
                     {
                         "id": "contact_card_info",
@@ -248,10 +249,13 @@ class GoogleWalletPassGenerator:
             full_object_id = f"{self.issuer_id}.{object_id}"
 
             # Create JWT payload with the pass object
+            current_time = int(time.time())
             payload = {
                 "iss": self.service_account_email,
                 "aud": "google",
                 "typ": "savetowallet",
+                "iat": current_time,  # Issued at time (REQUIRED by Google Wallet API)
+                "exp": current_time + 3600,  # Expires in 1 hour
                 "origins": self.origins,
                 "payload": {
                     "eventTicketObjects": [
@@ -262,11 +266,15 @@ class GoogleWalletPassGenerator:
                 }
             }
 
+            logger.info(f"Creating Google Wallet JWT for object {full_object_id}")
+            logger.debug(f"JWT payload: iss={self.service_account_email}, iat={current_time}, exp={current_time + 3600}")
+
             # Sign the JWT if credentials are available
             if self.credentials:
                 # Use the service account private key to sign
                 signer = crypt.RSASigner.from_service_account_file(self.service_account_file)
                 token = jwt.encode(signer, payload)
+                logger.info(f"Google Wallet JWT signed successfully (token length: {len(token)} chars)")
             else:
                 # For development without credentials, create unsigned token
                 logger.warning("No credentials - creating unsigned JWT (won't work in production)")
@@ -274,6 +282,7 @@ class GoogleWalletPassGenerator:
 
             # Generate the save URL
             save_url = f"https://pay.google.com/gp/v/save/{token}"
+            logger.info(f"Generated Google Wallet save URL for {full_object_id}")
 
             return save_url
 
