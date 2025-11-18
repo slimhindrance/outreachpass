@@ -103,6 +103,7 @@ class CardService:
         if settings.APPLE_WALLET_ENABLED and event:
             try:
                 apple_wallet_pass = await CardService._generate_apple_wallet_pass(
+                    db=db,
                     card=card,
                     attendee=attendee,
                     event=event,
@@ -119,6 +120,7 @@ class CardService:
         if settings.GOOGLE_WALLET_ENABLED and event:
             try:
                 google_wallet_pass = await CardService._generate_google_wallet_pass(
+                    db=db,
                     card=card,
                     attendee=attendee,
                     event=event,
@@ -142,7 +144,13 @@ class CardService:
                     card_url=card_url,
                     qr_url=f"{base_domain}/qr/{card.card_id}",
                     wallet_passes=wallet_passes,
-                    vcard_url=vcard_url
+                    vcard_url=vcard_url,
+                    # Tracking parameters
+                    card_id=card.card_id,
+                    tenant_id=attendee.tenant_id,
+                    event_id=attendee.event_id,
+                    attendee_id=attendee.attendee_id,
+                    db=db
                 )
             except Exception as e:
                 # Log email failure but don't fail pass generation
@@ -168,6 +176,7 @@ class CardService:
 
     @staticmethod
     async def _generate_apple_wallet_pass(
+        db: AsyncSession,
         card: Card,
         attendee: Attendee,
         event: Event,
@@ -247,6 +256,20 @@ class CardService:
 
             logger.info(f"Generated Apple Wallet pass for card {card.card_id}")
 
+            # Track wallet pass generation
+            try:
+                from app.services.analytics_service import AnalyticsService
+                await AnalyticsService.track_wallet_event(
+                    db=db,
+                    card=card,
+                    event_id=event.event_id,
+                    platform="apple",
+                    event_type="generated",
+                    request=None
+                )
+            except Exception as e:
+                logger.warning(f"Failed to track Apple Wallet pass generation: {str(e)}")
+
             return WalletPass(
                 type="apple",
                 url=pkpass_url,
@@ -259,6 +282,7 @@ class CardService:
 
     @staticmethod
     async def _generate_google_wallet_pass(
+        db: AsyncSession,
         card: Card,
         attendee: Attendee,
         event: Event,
@@ -346,6 +370,20 @@ class CardService:
             )
 
             logger.info(f"Generated Google Wallet pass for card {card.card_id}")
+
+            # Track wallet pass generation
+            try:
+                from app.services.analytics_service import AnalyticsService
+                await AnalyticsService.track_wallet_event(
+                    db=db,
+                    card=card,
+                    event_id=event.event_id,
+                    platform="google",
+                    event_type="generated",
+                    request=None
+                )
+            except Exception as e:
+                logger.warning(f"Failed to track Google Wallet pass generation: {str(e)}")
 
             return WalletPass(
                 type="google",
