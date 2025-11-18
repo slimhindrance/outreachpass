@@ -519,3 +519,120 @@ async def seed_db(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail=result['message'])
 
     return result
+
+
+# ═══════════════════════════════════════════════════════════
+# Analytics Endpoints
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/analytics/overview")
+async def get_analytics_overview(
+    tenant_id: uuid.UUID,
+    start_date: str = None,
+    end_date: str = None,
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Get high-level analytics overview for a tenant
+
+    Returns comprehensive metrics including:
+    - Total card views and unique visitors
+    - Email engagement (sent, opened, clicked)
+    - Wallet pass adoption (generated, added)
+    - Contact exports (vCard downloads)
+    - Device/browser breakdown
+    - Top performing cards
+    """
+    from app.services.analytics_service import AnalyticsService
+
+    try:
+        overview = await AnalyticsService.get_overview(
+            db=db,
+            tenant_id=tenant_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        return overview
+    except Exception as e:
+        logger.error(f"Failed to get analytics overview: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Analytics query failed: {str(e)}")
+
+
+@router.get("/analytics/card/{card_id}")
+async def get_card_analytics(
+    card_id: uuid.UUID,
+    start_date: str = None,
+    end_date: str = None,
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Get detailed analytics for a specific card
+
+    Returns card-specific metrics including:
+    - Card view trends over time
+    - Source breakdown (QR, email, direct link)
+    - Device and browser statistics
+    - Email engagement for this card
+    - Wallet pass events
+    - Contact export events
+    - Geographic distribution (if available)
+    """
+    from app.services.analytics_service import AnalyticsService
+
+    try:
+        card_metrics = await AnalyticsService.get_card_metrics(
+            db=db,
+            card_id=card_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if not card_metrics:
+            raise HTTPException(status_code=404, detail="Card not found or no analytics data available")
+
+        return card_metrics
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get card analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Analytics query failed: {str(e)}")
+
+
+@router.get("/analytics/event/{event_id}")
+async def get_event_analytics(
+    event_id: uuid.UUID,
+    start_date: str = None,
+    end_date: str = None,
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Get analytics for an entire event
+
+    Returns event-level metrics including:
+    - Total attendees and cards generated
+    - Card view statistics across all attendees
+    - Email campaign performance
+    - Wallet pass adoption rates
+    - Contact export statistics
+    - Top performing attendee cards
+    - Engagement trends over time
+    """
+    from app.services.analytics_service import AnalyticsService
+
+    try:
+        event_metrics = await AnalyticsService.get_event_metrics(
+            db=db,
+            event_id=event_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if not event_metrics:
+            raise HTTPException(status_code=404, detail="Event not found or no analytics data available")
+
+        return event_metrics
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get event analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Analytics query failed: {str(e)}")

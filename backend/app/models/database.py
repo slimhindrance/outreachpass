@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, DateTime, Text, Boolean, Integer, BigInteger, Date, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
 from sqlalchemy.sql import func
 from datetime import datetime
 import uuid
@@ -216,4 +216,114 @@ class PassGenerationJob(Base):
     completed_at = Column(DateTime(timezone=True))
 
     # Metadata
+    metadata_json = Column(JSONB, nullable=False, default={})
+
+
+# ============================================================================
+# Analytics & Tracking Models
+# ============================================================================
+
+class EmailEvent(Base):
+    __tablename__ = "email_events"
+
+    email_event_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(UUID(as_uuid=True), ForeignKey("events.event_id", ondelete="SET NULL"))
+    card_id = Column(UUID(as_uuid=True), ForeignKey("cards.card_id", ondelete="SET NULL"))
+    attendee_id = Column(UUID(as_uuid=True), ForeignKey("attendees.attendee_id", ondelete="SET NULL"))
+
+    # Email details
+    message_id = Column(Text, nullable=False)
+    recipient_email = Column(Text, nullable=False)
+
+    # Event type: sent, delivered, opened, clicked, bounced, complained
+    event_type = Column(String(50), nullable=False)
+
+    # Event metadata
+    link_url = Column(Text)
+    user_agent = Column(Text)
+    ip_address = Column(INET)
+
+    # Timestamps
+    occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    # Additional context
+    metadata_json = Column(JSONB, nullable=False, default={})
+
+
+class WalletPassEvent(Base):
+    __tablename__ = "wallet_pass_events"
+
+    wallet_event_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(UUID(as_uuid=True), ForeignKey("events.event_id", ondelete="SET NULL"))
+    card_id = Column(UUID(as_uuid=True), ForeignKey("cards.card_id", ondelete="CASCADE"), nullable=False)
+
+    # Platform: apple or google
+    platform = Column(String(20), nullable=False)
+
+    # Event type: generated, email_clicked, added_to_wallet, removed, updated
+    event_type = Column(String(50), nullable=False)
+
+    # Device/user context
+    user_agent = Column(Text)
+    ip_address = Column(INET)
+    device_type = Column(String(20))
+
+    # Timestamps
+    occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    # Additional context
+    metadata_json = Column(JSONB, nullable=False, default={})
+
+
+class CardViewEvent(Base):
+    __tablename__ = "card_view_events"
+
+    view_event_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(UUID(as_uuid=True), ForeignKey("events.event_id", ondelete="SET NULL"))
+    card_id = Column(UUID(as_uuid=True), ForeignKey("cards.card_id", ondelete="CASCADE"), nullable=False)
+
+    # Source tracking: qr_scan, direct_link, email_link, share
+    source_type = Column(String(50), nullable=False)
+    referrer_url = Column(Text)
+
+    # Device/user context
+    user_agent = Column(Text)
+    ip_address = Column(INET)
+    device_type = Column(String(20))
+    browser = Column(String(100))
+    os = Column(String(100))
+
+    # Session tracking
+    session_id = Column(Text)
+
+    # Timestamps
+    occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    # Additional context
+    metadata_json = Column(JSONB, nullable=False, default={})
+
+
+class ContactExportEvent(Base):
+    __tablename__ = "contact_export_events"
+
+    export_event_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(UUID(as_uuid=True), ForeignKey("events.event_id", ondelete="SET NULL"))
+    card_id = Column(UUID(as_uuid=True), ForeignKey("cards.card_id", ondelete="CASCADE"), nullable=False)
+
+    # Export type: vcard_download, add_to_contacts, copy_email, copy_phone
+    export_type = Column(String(50), nullable=False)
+
+    # Device/user context
+    user_agent = Column(Text)
+    ip_address = Column(INET)
+    device_type = Column(String(20))
+
+    # Timestamps
+    occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    # Additional context
     metadata_json = Column(JSONB, nullable=False, default={})

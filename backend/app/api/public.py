@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, text
@@ -10,6 +10,7 @@ from app.models.database import Card, ScanDaily, Event, Attendee, QRCode
 from app.models.schemas import CardResponse
 from app.utils.vcard import generate_vcard
 from app.utils.s3 import s3_client
+from app.services.analytics_service import AnalyticsService
 
 
 router = APIRouter(tags=["public"])
@@ -18,6 +19,7 @@ router = APIRouter(tags=["public"])
 @router.get("/c/{card_id}", response_class=HTMLResponse)
 async def get_card_page(
     card_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Render public contact card page"""
@@ -53,6 +55,21 @@ async def get_card_page(
             }
         )
         await db.commit()
+
+    # Track detailed card view event (new analytics)
+    source_type = "qr_scan" if "qr" in request.headers.get("referer", "").lower() else "direct_link"
+    try:
+        await AnalyticsService.track_card_view(
+            db=db,
+            card=card,
+            event_id=attendee.event_id if attendee else None,
+            source_type=source_type,
+            request=request
+        )
+    except Exception as e:
+        # Don't fail the request if analytics tracking fails
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to track card view: {str(e)}")
 
     # Build simple HTML response
     links_html = ""
@@ -141,6 +158,7 @@ async def get_card_page(
 @router.get("/c/{card_id}/vcard")
 async def download_vcard(
     card_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Download VCard file"""
@@ -176,6 +194,20 @@ async def download_vcard(
             }
         )
         await db.commit()
+
+    # Track contact export event (new analytics)
+    try:
+        await AnalyticsService.track_contact_export(
+            db=db,
+            card=card,
+            event_id=attendee.event_id if attendee else None,
+            export_type="vcard_download",
+            request=request
+        )
+    except Exception as e:
+        # Don't fail the request if analytics tracking fails
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to track contact export: {str(e)}")
 
     # Generate VCard
     vcard_str = generate_vcard(
