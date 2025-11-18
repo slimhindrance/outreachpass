@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 build/
+build\ */
 develop-eggs/
 dist/
 downloads/
@@ -22,6 +23,16 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Testing & Coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+coverage.xml
+*.cover
+.hypothesis/
 
 # Virtual environments
 venv/
@@ -49,11 +60,14 @@ env/
 .terraform.lock.hcl
 tfplan
 
-# Lambda packages
+# Lambda packages & build artifacts
 *.zip
 terraform/modules/lambda/lambda.zip
 terraform/modules/lambda/layers/
 lambda-worker-build/
+worker-deployment*.zip
+lambda_package/
+.aws-sam/
 
 # Node
 node_modules/
@@ -82,3 +96,15 @@ backend/apple-wallet-*.pem
 backend/*-credentials.json
 outreachpass-*.json
 *.json.terraform/
+
+# CI/CD artifacts
+.github/workflows/.env
+deployment-*.json
+artifact-*.tar.gz
+lambda-deploy-*.zip
+
+# Cache directories
+.cache/
+.mypy_cache/
+.ruff_cache/
+.eslintcache

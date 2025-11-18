@@ -1,0 +1,40 @@
+# Production Environment Variables
+# Copy this file to terraform.tfvars and fill in actual values
+# DO NOT commit terraform.tfvars to git!
+
+# Project Configuration
+project_name = "outreachpass"
+environment  = "prod"
+
+# AWS Configuration
+aws_region = "us-east-1"
+
+# Database Configuration
+db_instance_class    = "db.r6g.large"   # Production-grade
+db_allocated_storage = 100              # GB
+db_name              = "outreachpass_prod"
+db_username          = "postgres"
+# db_password stored in AWS Secrets Manager
+
+# Lambda Configuration
+lambda_memory_size = 1024  # MB
+lambda_timeout     = 60    # seconds
+
+# Domain Configuration
+domain_name     = "app.outreachpass.base2ml.com"
+certificate_arn = "arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERT_ID"
+
+# Tags
+tags = {
+  Project     = "OutreachPass"
+  Environment = "Production"
+  ManagedBy   = "Terraform"
+  CostCenter  = "Production"
+  Compliance  = "Required"
+}
+
+# Feature Flags
+enable_deletion_protection = true   # Prevent accidental deletion
+enable_backup_retention    = true   # 30-day backup retention
+enable_monitoring          = true   # Full monitoring suite
+enable_multi_az            = true   # High availability

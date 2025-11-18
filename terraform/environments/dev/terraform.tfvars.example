@@ -1,0 +1,38 @@
+# Development Environment Variables
+# Copy this file to terraform.tfvars and fill in actual values
+# DO NOT commit terraform.tfvars to git!
+
+# Project Configuration
+project_name = "outreachpass"
+environment  = "dev"
+
+# AWS Configuration
+aws_region = "us-east-1"
+
+# Database Configuration
+db_instance_class    = "db.t4g.medium"  # Smaller for dev
+db_allocated_storage = 20                # GB
+db_name              = "outreachpass_dev"
+db_username          = "postgres"
+# db_password stored in AWS Secrets Manager
+
+# Lambda Configuration
+lambda_memory_size = 512  # MB (smaller for dev)
+lambda_timeout     = 30   # seconds
+
+# Domain Configuration
+domain_name     = "dev.outreachpass.example.com"
+certificate_arn = "arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERT_ID"
+
+# Tags
+tags = {
+  Project     = "OutreachPass"
+  Environment = "Development"
+  ManagedBy   = "Terraform"
+  CostCenter  = "Engineering"
+}
+
+# Feature Flags
+enable_deletion_protection = false  # Allow easier cleanup in dev
+enable_backup_retention    = false  # No long-term backups in dev
+enable_monitoring          = true   # Still want metrics

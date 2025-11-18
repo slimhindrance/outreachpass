@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL: Optional[str] = None
     GOOGLE_WALLET_SERVICE_ACCOUNT_FILE: Optional[str] = None  # Path to JSON key file
     GOOGLE_WALLET_ORIGINS: list[str] = []  # Empty by default for email compatibility
+    GOOGLE_WALLET_CLASS_SUFFIX: str = "event_pass"  # Suffix for pass class IDs (change to force new class creation)
 
     class Config:
         env_file = ".env"

@@ -84,7 +84,7 @@ class GoogleWalletPassGenerator:
 
             class_resource = {
                 "id": full_class_id,
-                "eventId": full_class_id,  # Required field - unique identifier for the event
+                "eventId": class_id,  # Required field - must be ≤64 chars (use class_id without issuer prefix)
                 "issuerName": organization_name,
                 "eventName": {
                     "defaultValue": {
@@ -293,6 +293,10 @@ class GoogleWalletPassGenerator:
 
             signer = crypt.RSASigner.from_service_account_file(self.service_account_file)
             token = jwt.encode(signer, payload)
+
+            # Decode bytes to string if needed
+            if isinstance(token, bytes):
+                token = token.decode('utf-8')
 
             save_url = f"https://pay.google.com/gp/v/save/{token}"
             logger.info(f"Generated JWT-signed Google Wallet save URL for object {full_object_id}")

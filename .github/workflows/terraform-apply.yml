@@ -1,0 +1,132 @@
+name: Terraform Apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to apply changes'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      auto_approve:
+        description: 'Auto-approve (skip manual approval)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  TF_VERSION: '1.5.0'
+  AWS_REGION: us-east-1
+
+jobs:
+  terraform-apply-dev:
+    name: Apply to Development
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || inputs.environment == 'dev'
+    environment:
+      name: development
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: |
+          terraform init \
+            -backend-config="key=dev/terraform.tfstate"
+
+      - name: Terraform Plan
+        working-directory: ./terraform
+        run: |
+          terraform plan \
+            -var-file="environments/dev/terraform.tfvars" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: |
+          terraform apply -auto-approve tfplan
+
+      - name: Terraform Output
+        working-directory: ./terraform
+        run: |
+          terraform output -json > outputs.json
+          echo "## Terraform Outputs (Dev)" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat outputs.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  terraform-apply-prod:
+    name: Apply to Production
+    runs-on: ubuntu-latest
+    needs: terraform-apply-dev
+    if: (github.ref == 'refs/heads/main' || inputs.environment == 'prod') && !inputs.auto_approve
+    environment:
+      name: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: |
+          terraform init \
+            -backend-config="key=prod/terraform.tfstate"
+
+      - name: Terraform Plan
+        working-directory: ./terraform
+        run: |
+          terraform plan \
+            -var-file="environments/prod/terraform.tfvars" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: |
+          terraform apply -auto-approve tfplan
+
+      - name: Terraform Output
+        working-directory: ./terraform
+        run: |
+          terraform output -json > outputs.json
+          echo "## Terraform Outputs (Prod)" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat outputs.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Deployment notification
+        run: |
+          echo "✅ Infrastructure changes applied to production"
+          echo "Review outputs above for resource details"

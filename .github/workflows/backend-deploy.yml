@@ -1,0 +1,324 @@
+name: Deploy Backend API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      skip_tests:
+        description: 'Skip tests (emergency only)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  PYTHON_VERSION: '3.11'
+  AWS_REGION: us-east-1
+
+jobs:
+  build:
+    name: Build Lambda Package
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact_key: ${{ steps.artifact.outputs.key }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Generate version
+        id: version
+        run: |
+          VERSION=$(date +%Y%m%d-%H%M%S)-${GITHUB_SHA:0:7}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Export dependencies
+        working-directory: ./backend
+        run: |
+          poetry export -f requirements.txt --output requirements.txt --without-hashes
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          mkdir -p package
+          pip install -r requirements.txt -t package/
+
+          # Copy application code
+          cp -r app package/
+
+          # Create Lambda handler if needed
+          if [ ! -f package/lambda_handler.py ]; then
+            cat > package/lambda_handler.py <<'EOF'
+          from mangum import Mangum
+          from app.main import app
+
+          handler = Mangum(app, lifespan="off")
+          EOF
+          fi
+
+      - name: Run tests (unless skipped)
+        if: ${{ !inputs.skip_tests }}
+        working-directory: ./backend
+        run: |
+          poetry install --with dev
+          poetry run pytest -v --cov=app --cov-fail-under=70
+
+      - name: Create deployment package
+        working-directory: ./backend
+        run: |
+          cd package
+          zip -r ../lambda-deployment-${{ steps.version.outputs.version }}.zip . -x "*.pyc" -x "*__pycache__*"
+          cd ..
+
+          # Verify package size
+          SIZE=$(du -h lambda-deployment-${{ steps.version.outputs.version }}.zip | cut -f1)
+          echo "Package size: $SIZE"
+
+          # Warn if over 50MB (Lambda limit is 50MB zipped)
+          if [ $(stat -f%z lambda-deployment-${{ steps.version.outputs.version }}.zip) -gt 52428800 ]; then
+            echo "⚠️ Warning: Package exceeds 50MB limit!"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload to S3
+        id: artifact
+        working-directory: ./backend
+        run: |
+          ARTIFACT_KEY="backend/${{ steps.version.outputs.version }}/lambda.zip"
+
+          aws s3 cp lambda-deployment-${{ steps.version.outputs.version }}.zip \
+            s3://${{ secrets.ARTIFACT_BUCKET_NAME }}/$ARTIFACT_KEY
+
+          echo "key=$ARTIFACT_KEY" >> $GITHUB_OUTPUT
+          echo "Artifact uploaded: s3://${{ secrets.ARTIFACT_BUCKET_NAME }}/$ARTIFACT_KEY"
+
+      - name: Create deployment metadata
+        run: |
+          cat > deployment-metadata.json <<EOF
+          {
+            "version": "${{ steps.version.outputs.version }}",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "author": "${{ github.actor }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "artifact_key": "${{ steps.artifact.outputs.key }}"
+          }
+          EOF
+
+          aws s3 cp deployment-metadata.json \
+            s3://${{ secrets.ARTIFACT_BUCKET_NAME }}/backend/${{ steps.version.outputs.version }}/metadata.json
+
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' || inputs.environment == 'dev'
+    environment:
+      name: development
+      url: https://dev-api.outreachpass.base2ml.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download artifact from S3
+        run: |
+          aws s3 cp s3://${{ secrets.ARTIFACT_BUCKET_NAME }}/${{ needs.build.outputs.artifact_key }} lambda.zip
+
+      - name: Update Lambda function
+        run: |
+          aws lambda update-function-code \
+            --function-name outreachpass-api-dev \
+            --zip-file fileb://lambda.zip \
+            --publish
+
+      - name: Update function configuration
+        run: |
+          aws lambda update-function-configuration \
+            --function-name outreachpass-api-dev \
+            --environment Variables={
+              VERSION="${{ needs.build.outputs.version }}",
+              ENVIRONMENT="dev"
+            }
+
+      - name: Wait for update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name outreachpass-api-dev
+
+      - name: Run database migrations
+        run: |
+          chmod +x scripts/ci/migrate-database.sh
+          ./scripts/ci/migrate-database.sh dev
+
+      - name: Health check
+        run: |
+          chmod +x scripts/ci/health-check.sh
+          ./scripts/ci/health-check.sh https://dev-api.outreachpass.base2ml.com
+
+      - name: Smoke tests
+        run: |
+          chmod +x scripts/ci/smoke-tests.sh
+          ./scripts/ci/smoke-tests.sh https://dev-api.outreachpass.base2ml.com
+
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, deploy-dev]
+    if: github.ref == 'refs/heads/main' || inputs.environment == 'prod'
+    environment:
+      name: production
+      url: https://api.outreachpass.base2ml.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download artifact from S3
+        run: |
+          aws s3 cp s3://${{ secrets.ARTIFACT_BUCKET_NAME }}/${{ needs.build.outputs.artifact_key }} lambda.zip
+
+      - name: Create Lambda alias backup
+        run: |
+          CURRENT_VERSION=$(aws lambda get-alias \
+            --function-name outreachpass-api-prod \
+            --name live \
+            --query 'FunctionVersion' \
+            --output text)
+
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_ENV
+          echo "Backing up current version: $CURRENT_VERSION"
+
+      - name: Update Lambda function
+        id: update
+        run: |
+          RESPONSE=$(aws lambda update-function-code \
+            --function-name outreachpass-api-prod \
+            --zip-file fileb://lambda.zip \
+            --publish)
+
+          NEW_VERSION=$(echo $RESPONSE | jq -r '.Version')
+          echo "new_version=$NEW_VERSION" >> $GITHUB_ENV
+          echo "Deployed version: $NEW_VERSION"
+
+      - name: Update function configuration
+        run: |
+          aws lambda update-function-configuration \
+            --function-name outreachpass-api-prod \
+            --environment Variables={
+              VERSION="${{ needs.build.outputs.version }}",
+              ENVIRONMENT="prod"
+            }
+
+      - name: Wait for update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name outreachpass-api-prod
+
+      - name: Run database migrations
+        run: |
+          chmod +x scripts/ci/migrate-database.sh
+          ./scripts/ci/migrate-database.sh prod
+
+      - name: Update live alias
+        run: |
+          aws lambda update-alias \
+            --function-name outreachpass-api-prod \
+            --name live \
+            --function-version ${{ env.new_version }}
+
+      - name: Health check
+        id: health
+        run: |
+          chmod +x scripts/ci/health-check.sh
+          ./scripts/ci/health-check.sh https://api.outreachpass.base2ml.com
+        continue-on-error: true
+
+      - name: Rollback on failure
+        if: steps.health.outcome == 'failure'
+        run: |
+          echo "Health check failed! Rolling back..."
+
+          aws lambda update-alias \
+            --function-name outreachpass-api-prod \
+            --name live \
+            --function-version ${{ env.current_version }}
+
+          echo "Rolled back to version: ${{ env.current_version }}"
+          exit 1
+
+      - name: Smoke tests
+        run: |
+          chmod +x scripts/ci/smoke-tests.sh
+          ./scripts/ci/smoke-tests.sh https://api.outreachpass.base2ml.com
+
+  notify:
+    name: Send Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [build, deploy-prod]
+    if: always()
+
+    steps:
+      - name: Deployment notification
+        run: |
+          STATUS="${{ needs.deploy-prod.result }}"
+          if [ "$STATUS" = "success" ]; then
+            EMOJI="✅"
+            MESSAGE="Backend deployment successful!"
+          else
+            EMOJI="❌"
+            MESSAGE="Backend deployment failed!"
+          fi
+
+          echo "$EMOJI $MESSAGE"
+          echo "Version: ${{ needs.build.outputs.version }}"
+          echo "Commit: ${{ github.sha }}"
+
+          # Add Slack notification here if SLACK_WEBHOOK_URL is configured
+          # curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+          #   -H 'Content-Type: application/json' \
+          #   -d "{\"text\":\"$EMOJI Backend Deployment\n$MESSAGE\nVersion: ${{ needs.build.outputs.version }}\"}"

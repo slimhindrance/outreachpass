@@ -293,7 +293,8 @@ class CardService:
             )
 
             # Generate class ID from event (one class per event)
-            class_id = f"event_{event.event_id}".replace("-", "_")
+            # Use configurable suffix to allow forcing new class creation with all required fields
+            class_id = f"{settings.GOOGLE_WALLET_CLASS_SUFFIX}_{event.event_id}".replace("-", "_")
 
             # Create/update the pass class (template) for this event
             generator.create_event_pass_class(

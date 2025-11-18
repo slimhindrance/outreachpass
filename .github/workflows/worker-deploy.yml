@@ -1,0 +1,367 @@
+name: Deploy Worker Lambda
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/app/services/**'
+      - 'backend/app/utils/**'
+      - '.github/workflows/worker-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+
+env:
+  PYTHON_VERSION: '3.11'
+  AWS_REGION: us-east-1
+
+jobs:
+  build-worker:
+    name: Build Worker Lambda Package
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact_key: ${{ steps.artifact.outputs.key }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Generate version
+        id: version
+        run: |
+          VERSION=$(date +%Y%m%d-%H%M%S)-${GITHUB_SHA:0:7}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          pip install --upgrade pip
+          mkdir -p worker-package
+
+          # Install requirements
+          pip install -r requirements.txt -t worker-package/
+
+          # Copy worker code
+          cp -r app worker-package/
+
+          # Create worker handler
+          cat > worker-package/worker_handler.py <<'EOF'
+          import json
+          import os
+          from app.services.card_service import process_pass_generation
+
+          def handler(event, context):
+              """
+              Worker Lambda handler for async pass generation
+              Triggered by SQS or EventBridge
+              """
+              try:
+                  print(f"Received event: {json.dumps(event)}")
+
+                  # Handle SQS event
+                  if 'Records' in event:
+                      for record in event['Records']:
+                          body = json.loads(record['body'])
+                          attendee_id = body.get('attendee_id')
+
+                          print(f"Processing pass generation for attendee: {attendee_id}")
+                          result = process_pass_generation(attendee_id)
+
+                          print(f"Result: {result}")
+
+                  # Handle direct invocation
+                  elif 'attendee_id' in event:
+                      attendee_id = event['attendee_id']
+                      result = process_pass_generation(attendee_id)
+
+                      return {
+                          'statusCode': 200,
+                          'body': json.dumps(result)
+                      }
+
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({'message': 'Processing complete'})
+                  }
+
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
+          EOF
+
+      - name: Create deployment package
+        working-directory: ./backend
+        run: |
+          cd worker-package
+          zip -r ../worker-lambda-${{ steps.version.outputs.version }}.zip . \
+            -x "*.pyc" -x "*__pycache__*" -x "*.dist-info/*"
+          cd ..
+
+          SIZE=$(du -h worker-lambda-${{ steps.version.outputs.version }}.zip | cut -f1)
+          echo "Package size: $SIZE"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload to S3
+        id: artifact
+        working-directory: ./backend
+        run: |
+          ARTIFACT_KEY="worker/${{ steps.version.outputs.version }}/lambda.zip"
+
+          aws s3 cp worker-lambda-${{ steps.version.outputs.version }}.zip \
+            s3://${{ secrets.ARTIFACT_BUCKET_NAME }}/$ARTIFACT_KEY
+
+          echo "key=$ARTIFACT_KEY" >> $GITHUB_OUTPUT
+          echo "Artifact uploaded: s3://${{ secrets.ARTIFACT_BUCKET_NAME }}/$ARTIFACT_KEY"
+
+  deploy-worker-dev:
+    name: Deploy Worker to Development
+    runs-on: ubuntu-latest
+    needs: build-worker
+    if: github.ref == 'refs/heads/main' || inputs.environment == 'dev'
+    environment:
+      name: development
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download artifact from S3
+        run: |
+          aws s3 cp s3://${{ secrets.ARTIFACT_BUCKET_NAME }}/${{ needs.build-worker.outputs.artifact_key }} worker-lambda.zip
+
+      - name: Update worker Lambda function
+        run: |
+          aws lambda update-function-code \
+            --function-name outreachpass-worker-dev \
+            --zip-file fileb://worker-lambda.zip \
+            --publish
+
+      - name: Update function configuration
+        run: |
+          # Get database credentials
+          DB_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "/outreachpass/dev/database" \
+            --query SecretString \
+            --output text)
+
+          DATABASE_URL=$(echo "$DB_SECRET" | jq -r '.connection_string')
+
+          aws lambda update-function-configuration \
+            --function-name outreachpass-worker-dev \
+            --environment Variables={
+              VERSION="${{ needs.build-worker.outputs.version }}",
+              ENVIRONMENT="dev",
+              DATABASE_URL="$DATABASE_URL"
+            } \
+            --timeout 300 \
+            --memory-size 512
+
+      - name: Wait for update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name outreachpass-worker-dev
+
+      - name: Configure EventBridge rule (if not exists)
+        run: |
+          # Check if rule exists
+          if ! aws events describe-rule --name outreachpass-worker-trigger-dev 2>/dev/null; then
+            echo "Creating EventBridge rule..."
+
+            aws events put-rule \
+              --name outreachpass-worker-trigger-dev \
+              --description "Trigger OutreachPass worker Lambda" \
+              --event-pattern '{"source":["outreachpass.backend"],"detail-type":["PassGeneration"]}'
+
+            aws lambda add-permission \
+              --function-name outreachpass-worker-dev \
+              --statement-id EventBridgeInvoke \
+              --action lambda:InvokeFunction \
+              --principal events.amazonaws.com \
+              --source-arn arn:aws:events:${{ env.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:rule/outreachpass-worker-trigger-dev
+
+            aws events put-targets \
+              --rule outreachpass-worker-trigger-dev \
+              --targets "Id"="1","Arn"="arn:aws:lambda:${{ env.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:function:outreachpass-worker-dev"
+          else
+            echo "EventBridge rule already exists"
+          fi
+
+      - name: Test worker with sample event
+        run: |
+          echo "Testing worker with sample event..."
+          aws lambda invoke \
+            --function-name outreachpass-worker-dev \
+            --payload '{"attendee_id": "test-123"}' \
+            response.json
+
+          cat response.json
+          echo ""
+
+  deploy-worker-prod:
+    name: Deploy Worker to Production
+    runs-on: ubuntu-latest
+    needs: [build-worker, deploy-worker-dev]
+    if: github.ref == 'refs/heads/main' || inputs.environment == 'prod'
+    environment:
+      name: production
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download artifact from S3
+        run: |
+          aws s3 cp s3://${{ secrets.ARTIFACT_BUCKET_NAME }}/${{ needs.build-worker.outputs.artifact_key }} worker-lambda.zip
+
+      - name: Create Lambda alias backup
+        run: |
+          CURRENT_VERSION=$(aws lambda get-alias \
+            --function-name outreachpass-worker-prod \
+            --name live \
+            --query 'FunctionVersion' \
+            --output text 2>/dev/null || echo "1")
+
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_ENV
+          echo "Backing up current version: $CURRENT_VERSION"
+
+      - name: Update worker Lambda function
+        id: update
+        run: |
+          RESPONSE=$(aws lambda update-function-code \
+            --function-name outreachpass-worker-prod \
+            --zip-file fileb://worker-lambda.zip \
+            --publish)
+
+          NEW_VERSION=$(echo $RESPONSE | jq -r '.Version')
+          echo "new_version=$NEW_VERSION" >> $GITHUB_ENV
+          echo "Deployed version: $NEW_VERSION"
+
+      - name: Update function configuration
+        run: |
+          # Get database credentials
+          DB_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "/outreachpass/prod/database" \
+            --query SecretString \
+            --output text)
+
+          DATABASE_URL=$(echo "$DB_SECRET" | jq -r '.connection_string')
+
+          aws lambda update-function-configuration \
+            --function-name outreachpass-worker-prod \
+            --environment Variables={
+              VERSION="${{ needs.build-worker.outputs.version }}",
+              ENVIRONMENT="prod",
+              DATABASE_URL="$DATABASE_URL"
+            } \
+            --timeout 300 \
+            --memory-size 1024
+
+      - name: Wait for update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name outreachpass-worker-prod
+
+      - name: Update live alias
+        run: |
+          # Create or update alias
+          if aws lambda get-alias --function-name outreachpass-worker-prod --name live 2>/dev/null; then
+            aws lambda update-alias \
+              --function-name outreachpass-worker-prod \
+              --name live \
+              --function-version ${{ env.new_version }}
+          else
+            aws lambda create-alias \
+              --function-name outreachpass-worker-prod \
+              --name live \
+              --function-version ${{ env.new_version }}
+          fi
+
+      - name: Configure EventBridge rule
+        run: |
+          if ! aws events describe-rule --name outreachpass-worker-trigger-prod 2>/dev/null; then
+            echo "Creating EventBridge rule..."
+
+            aws events put-rule \
+              --name outreachpass-worker-trigger-prod \
+              --description "Trigger OutreachPass worker Lambda (production)" \
+              --event-pattern '{"source":["outreachpass.backend"],"detail-type":["PassGeneration"]}'
+
+            aws lambda add-permission \
+              --function-name outreachpass-worker-prod \
+              --statement-id EventBridgeInvoke \
+              --action lambda:InvokeFunction \
+              --principal events.amazonaws.com \
+              --source-arn arn:aws:events:${{ env.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:rule/outreachpass-worker-trigger-prod \
+              --qualifier live
+
+            aws events put-targets \
+              --rule outreachpass-worker-trigger-prod \
+              --targets "Id"="1","Arn"="arn:aws:lambda:${{ env.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:function:outreachpass-worker-prod:live"
+          else
+            echo "EventBridge rule already exists"
+          fi
+
+      - name: Test worker (non-blocking)
+        run: |
+          echo "Testing worker with sample event..."
+          aws lambda invoke \
+            --function-name outreachpass-worker-prod \
+            --qualifier live \
+            --payload '{"attendee_id": "health-check"}' \
+            response.json || true
+
+          cat response.json || echo "No response file"
+          echo ""
+
+  notify:
+    name: Send Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [build-worker, deploy-worker-prod]
+    if: always()
+
+    steps:
+      - name: Deployment notification
+        run: |
+          STATUS="${{ needs.deploy-worker-prod.result }}"
+          if [ "$STATUS" = "success" ]; then
+            EMOJI="✅"
+            MESSAGE="Worker Lambda deployment successful!"
+          else
+            EMOJI="❌"
+            MESSAGE="Worker Lambda deployment failed!"
+          fi
+
+          echo "$EMOJI $MESSAGE"
+          echo "Version: ${{ needs.build-worker.outputs.version }}"
+          echo "Commit: ${{ github.sha }}"
