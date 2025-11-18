@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
 from app.core.config import settings
-from app.api import admin, public
+from app.api import admin, public, tracking
 
 # Create FastAPI app
 app = FastAPI(
@@ -25,6 +25,7 @@ app.add_middleware(
 # Include routers
 app.include_router(admin.router, prefix=settings.API_V1_STR)
 app.include_router(public.router)
+app.include_router(tracking.router, prefix="/api")  # Email/link tracking endpoints
 
 
 @app.get("/")
