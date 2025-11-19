@@ -20,6 +20,7 @@ from app.models.schemas import (
     EventUpdate,
     EventResponse,
     AttendeeResponse,
+    AttendeeBase,
     AttendeeCreate,
     AttendeeImportRow,
     PassIssuanceRequest,
@@ -298,7 +299,7 @@ async def list_attendees(
 @router.post("/events/{event_id}/attendees", response_model=AttendeeResponse, status_code=201)
 async def create_attendee(
     event_id: uuid.UUID,
-    attendee_data: AttendeeCreate,
+    attendee_data: AttendeeBase,
     db: AsyncSession = Depends(get_db)
 ):
     """Create a single attendee for an event"""
@@ -326,7 +327,7 @@ async def create_attendee(
                 Attendee.email == attendee_data.email
             )
         )
-        if existing_result.scalar_one_or_none():
+        if existing_result.first():
             raise HTTPException(
                 status_code=409,
                 detail=f"Attendee with email {attendee_data.email} already exists for this event"
