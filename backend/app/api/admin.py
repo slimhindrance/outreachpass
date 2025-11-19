@@ -20,6 +20,7 @@ from app.models.schemas import (
     EventUpdate,
     EventResponse,
     AttendeeResponse,
+    AttendeeCreate,
     AttendeeImportRow,
     PassIssuanceRequest,
     PassIssuanceResponse,
@@ -292,6 +293,66 @@ async def list_attendees(
     )
     attendees = result.scalars().all()
     return attendees
+
+
+@router.post("/events/{event_id}/attendees", response_model=AttendeeResponse, status_code=201)
+async def create_attendee(
+    event_id: uuid.UUID,
+    attendee_data: AttendeeCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a single attendee for an event"""
+    # Verify event exists
+    event_result = await db.execute(
+        select(Event).where(Event.event_id == event_id)
+    )
+    event = event_result.scalar_one_or_none()
+
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Validate that at least one of email or phone is provided
+    if not attendee_data.email and not attendee_data.phone:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one contact method (email or phone) is required"
+        )
+
+    # Check for duplicate email in the same event
+    if attendee_data.email:
+        existing_result = await db.execute(
+            select(Attendee).where(
+                Attendee.event_id == event_id,
+                Attendee.email == attendee_data.email
+            )
+        )
+        if existing_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Attendee with email {attendee_data.email} already exists for this event"
+            )
+
+    # Create attendee
+    attendee = Attendee(
+        event_id=event_id,
+        tenant_id=event.tenant_id,
+        email=attendee_data.email,
+        phone=attendee_data.phone,
+        first_name=attendee_data.first_name,
+        last_name=attendee_data.last_name,
+        org_name=attendee_data.org_name,
+        title=attendee_data.title,
+        linkedin_url=attendee_data.linkedin_url,
+        flags_json=attendee_data.flags_json or {}
+    )
+
+    db.add(attendee)
+    await db.commit()
+    await db.refresh(attendee)
+
+    logger.info(f"Created attendee {attendee.attendee_id} for event {event_id}")
+
+    return attendee
 
 
 @router.get("/attendees/{attendee_id}", response_model=AttendeeResponse)

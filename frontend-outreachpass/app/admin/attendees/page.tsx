@@ -4,11 +4,13 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api/client';
 import { Attendee, Event } from '@/types';
-import { Upload, Search, Users, Mail, Phone, Building } from 'lucide-react';
+import { Upload, Search, Users, Mail, Phone, Building, UserPlus } from 'lucide-react';
 import { CSVImport } from '@/components/admin/CSVImport';
+import { AddAttendeeModal, AttendeeFormData } from '@/components/admin/AddAttendeeModal';
 
 export default function AttendeesPage() {
   const [showImport, setShowImport] = useState(false);
+  const [showAddAttendee, setShowAddAttendee] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -53,6 +55,28 @@ export default function AttendeesPage() {
     return result;
   };
 
+  const handleAddAttendee = async (attendeeData: AttendeeFormData) => {
+    if (!selectedEventId) {
+      throw new Error('Please select an event first');
+    }
+
+    try {
+      await apiClient.post(
+        `/admin/events/${selectedEventId}/attendees`,
+        {
+          ...attendeeData,
+          event_id: selectedEventId,
+        }
+      );
+      await refetchAttendees();
+    } catch (error: any) {
+      if (error.response?.status === 409) {
+        throw new Error('An attendee with this email already exists for this event');
+      }
+      throw new Error(error.response?.data?.detail || 'Failed to add attendee');
+    }
+  };
+
   const filteredAttendees = attendees?.filter(attendee => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
@@ -73,14 +97,24 @@ export default function AttendeesPage() {
             Manage event attendees and issue passes
           </p>
         </div>
-        <button
-          onClick={() => setShowImport(true)}
-          disabled={!selectedEventId}
-          className="inline-flex items-center px-4 py-2 bg-brand-primary text-white rounded-lg hover:bg-brand-primary/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Upload className="h-5 w-5 mr-2" />
-          Import CSV
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowAddAttendee(true)}
+            disabled={!selectedEventId}
+            className="inline-flex items-center px-4 py-2 border border-brand-primary text-brand-primary rounded-lg hover:bg-brand-primary/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <UserPlus className="h-5 w-5 mr-2" />
+            Add Attendee
+          </button>
+          <button
+            onClick={() => setShowImport(true)}
+            disabled={!selectedEventId}
+            className="inline-flex items-center px-4 py-2 bg-brand-primary text-white rounded-lg hover:bg-brand-primary/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Upload className="h-5 w-5 mr-2" />
+            Import CSV
+          </button>
+        </div>
       </div>
 
       {/* Search and Filters */}
@@ -208,6 +242,13 @@ export default function AttendeesPage() {
           </button>
         </div>
       )}
+
+      {/* Add Attendee Modal */}
+      <AddAttendeeModal
+        isOpen={showAddAttendee}
+        onClose={() => setShowAddAttendee(false)}
+        onAdd={handleAddAttendee}
+      />
 
       {/* CSV Import Modal */}
       <CSVImport
