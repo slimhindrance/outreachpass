@@ -108,3 +108,26 @@ export interface AnalyticsQueryParams {
   metric?: 'views' | 'downloads' | 'wallet_adds' | 'emails_sent';
   granularity?: 'hour' | 'day' | 'week';
 }
+
+// Card-level analytics types
+export interface CardActivityEvent {
+  event_name: string;
+  occurred_at: string;
+  device_type?: string;
+  browser?: string;
+  os?: string;
+}
+
+export interface CardAnalyticsResponse {
+  card_id: string;
+  total_views: number;
+  total_vcard_downloads: number;
+  total_apple_wallet_adds: number;
+  total_google_wallet_adds: number;
+  total_wallet_adds: number;
+  total_email_opens: number;
+  total_email_clicks: number;
+  first_viewed_at?: string;
+  last_activity_at?: string;
+  recent_activity: CardActivityEvent[];
+}

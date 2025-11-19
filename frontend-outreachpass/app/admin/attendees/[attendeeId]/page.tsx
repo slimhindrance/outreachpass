@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api/client';
 import { Attendee } from '@/types';
+import { CardAnalyticsResponse } from '@/types/analytics';
 import {
   ArrowLeft,
   Mail,
@@ -39,11 +40,11 @@ export default function AttendeeDetailPage() {
   });
 
   // Fetch card analytics if card_id exists
-  const { data: analytics } = useQuery({
+  const { data: analytics } = useQuery<CardAnalyticsResponse | null>({
     queryKey: ['card-analytics', attendee?.card_id],
     queryFn: async () => {
       if (!attendee?.card_id) return null;
-      return await apiClient.get(`/api/analytics/cards/${attendee.card_id}?days=365`);
+      return await apiClient.get<CardAnalyticsResponse>(`/api/analytics/cards/${attendee.card_id}?days=365`);
     },
     enabled: !!attendee?.card_id,
     refetchInterval: 30000, // Auto-refresh analytics every 30 seconds
