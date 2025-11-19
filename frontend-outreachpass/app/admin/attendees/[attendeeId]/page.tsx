@@ -34,6 +34,8 @@ export default function AttendeeDetailPage() {
     queryKey: ['attendee', attendeeId],
     queryFn: async () => await apiClient.get<Attendee>(`/admin/attendees/${attendeeId}`),
     enabled: !!attendeeId,
+    refetchInterval: 30000, // Auto-refresh every 30 seconds
+    refetchOnWindowFocus: true,
   });
 
   // Fetch card analytics if card_id exists
@@ -44,6 +46,8 @@ export default function AttendeeDetailPage() {
       return await apiClient.get(`/api/analytics/cards/${attendee.card_id}?days=365`);
     },
     enabled: !!attendee?.card_id,
+    refetchInterval: 30000, // Auto-refresh analytics every 30 seconds
+    refetchOnWindowFocus: true,
   });
 
   const generatePassMutation = useMutation({
@@ -102,8 +106,59 @@ export default function AttendeeDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-primary"></div>
+      <div className="animate-pulse">
+        {/* Header Skeleton */}
+        <div className="mb-8">
+          <div className="h-4 w-24 bg-gray-200 rounded mb-4"></div>
+          <div className="flex justify-between items-start">
+            <div className="space-y-2">
+              <div className="h-8 w-64 bg-gray-200 rounded"></div>
+              <div className="h-5 w-48 bg-gray-200 rounded"></div>
+              <div className="h-4 w-32 bg-gray-200 rounded"></div>
+            </div>
+            <div className="flex gap-3">
+              <div className="h-10 w-24 bg-gray-200 rounded-lg"></div>
+              <div className="h-10 w-24 bg-gray-200 rounded-lg"></div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Content Skeleton */}
+          <div className="lg:col-span-2 space-y-6">
+            {[1, 2].map((i) => (
+              <div key={i} className="bg-white shadow rounded-lg p-6">
+                <div className="h-6 w-40 bg-gray-200 rounded mb-4"></div>
+                <div className="space-y-4">
+                  {[1, 2, 3].map((j) => (
+                    <div key={j} className="flex items-center">
+                      <div className="h-5 w-5 bg-gray-200 rounded-full mr-3"></div>
+                      <div className="flex-1 space-y-2">
+                        <div className="h-3 w-16 bg-gray-200 rounded"></div>
+                        <div className="h-4 w-48 bg-gray-200 rounded"></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Sidebar Skeleton */}
+          <div className="space-y-6">
+            <div className="bg-white shadow rounded-lg p-6">
+              <div className="h-6 w-32 bg-gray-200 rounded mb-4"></div>
+              <div className="space-y-3">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i}>
+                    <div className="h-3 w-24 bg-gray-200 rounded mb-1"></div>
+                    <div className="h-8 w-full bg-gray-200 rounded"></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

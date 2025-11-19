@@ -36,6 +36,8 @@ export default function EventsPage() {
       const response = await apiClient.get<Event[]>('/admin/events');
       return response;
     },
+    refetchInterval: 30000, // Auto-refresh every 30 seconds
+    refetchOnWindowFocus: true, // Refresh when user returns to tab
   });
 
   // Bulk delete mutation
@@ -320,9 +322,32 @@ export default function EventsPage() {
 
       {/* Events List */}
       {isLoading ? (
-        <div className="bg-white shadow rounded-lg p-8 text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-primary mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading events...</p>
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-white shadow rounded-lg p-6 animate-pulse">
+              <div className="flex items-start gap-4">
+                <div className="h-5 w-5 bg-gray-200 rounded"></div>
+                <div className="flex-1 space-y-3">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-2 flex-1">
+                      <div className="h-6 bg-gray-200 rounded w-1/3"></div>
+                      <div className="h-4 bg-gray-200 rounded w-2/3"></div>
+                    </div>
+                    <div className="h-6 w-20 bg-gray-200 rounded-full"></div>
+                  </div>
+                  <div className="flex gap-4">
+                    <div className="h-4 bg-gray-200 rounded w-32"></div>
+                    <div className="h-4 bg-gray-200 rounded w-32"></div>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="h-9 bg-gray-200 rounded w-24"></div>
+                    <div className="h-9 bg-gray-200 rounded w-24"></div>
+                    <div className="h-9 bg-gray-200 rounded w-24"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : filteredEvents.length > 0 ? (
         <div>
