@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Static export for Amplify WEB platform
-  output: 'export',
+  // Standalone output for Docker/ECS deployment
+  output: 'standalone',
   images: {
     unoptimized: true,
   },
