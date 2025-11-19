@@ -634,3 +634,136 @@ async def get_tenant_analytics_summary(
         "total_wallet_adds": row.total_wallet_adds or 0,
         "total_emails_sent": row.total_emails_sent or 0
     }
+
+
+# ============================================================================
+# Card-Level Analytics Endpoint
+# ============================================================================
+
+class CardActivityEvent(BaseModel):
+    event_name: str
+    occurred_at: datetime
+    device_type: Optional[str] = None
+    browser: Optional[str] = None
+    os: Optional[str] = None
+
+
+class CardAnalyticsResponse(BaseModel):
+    card_id: uuid.UUID
+    total_views: int
+    total_vcard_downloads: int
+    total_apple_wallet_adds: int
+    total_google_wallet_adds: int
+    total_wallet_adds: int
+    total_email_opens: int
+    total_email_clicks: int
+    first_viewed_at: Optional[datetime] = None
+    last_activity_at: Optional[datetime] = None
+    recent_activity: List[CardActivityEvent]
+
+
+@router.get("/cards/{card_id}", response_model=CardAnalyticsResponse)
+async def get_card_analytics(
+    card_id: uuid.UUID,
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get analytics for a specific card (attendee)
+
+    Returns:
+    - Total interaction counts (views, downloads, wallet adds)
+    - Email engagement metrics
+    - First view and last activity timestamps
+    - Recent activity timeline (last 10 events)
+    """
+
+    # Calculate date range
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=days)
+
+    # Get event counts by type
+    counts_query = text("""
+        SELECT
+            event_name,
+            COUNT(*) as count
+        FROM analytics_events
+        WHERE card_id = :card_id
+          AND occurred_at >= :start_date
+        GROUP BY event_name
+    """)
+
+    counts_result = await db.execute(
+        counts_query,
+        {"card_id": card_id, "start_date": start_date}
+    )
+    counts = {row.event_name: row.count for row in counts_result}
+
+    # Extract specific metrics
+    total_views = counts.get("card_viewed", 0)
+    total_vcard_downloads = counts.get("vcard_downloaded", 0)
+    total_apple_wallet = counts.get("apple_wallet_generated", 0)
+    total_google_wallet = counts.get("google_wallet_generated", 0)
+    total_wallet_adds = total_apple_wallet + total_google_wallet
+    total_email_opens = counts.get("email_opened", 0)
+    total_email_clicks = counts.get("email_clicked", 0)
+
+    # Get first view and last activity timestamps
+    timestamps_query = text("""
+        SELECT
+            MIN(occurred_at) FILTER (WHERE event_name = 'card_viewed') as first_viewed_at,
+            MAX(occurred_at) as last_activity_at
+        FROM analytics_events
+        WHERE card_id = :card_id
+    """)
+
+    timestamps_result = await db.execute(
+        timestamps_query,
+        {"card_id": card_id}
+    )
+    timestamps = timestamps_result.first()
+
+    # Get recent activity (last 10 events)
+    activity_query = text("""
+        SELECT
+            event_name,
+            occurred_at,
+            device_type,
+            browser,
+            os
+        FROM analytics_events
+        WHERE card_id = :card_id
+          AND occurred_at >= :start_date
+        ORDER BY occurred_at DESC
+        LIMIT 10
+    """)
+
+    activity_result = await db.execute(
+        activity_query,
+        {"card_id": card_id, "start_date": start_date}
+    )
+
+    recent_activity = [
+        CardActivityEvent(
+            event_name=row.event_name,
+            occurred_at=row.occurred_at,
+            device_type=row.device_type,
+            browser=row.browser,
+            os=row.os
+        )
+        for row in activity_result
+    ]
+
+    return CardAnalyticsResponse(
+        card_id=card_id,
+        total_views=total_views,
+        total_vcard_downloads=total_vcard_downloads,
+        total_apple_wallet_adds=total_apple_wallet,
+        total_google_wallet_adds=total_google_wallet,
+        total_wallet_adds=total_wallet_adds,
+        total_email_opens=total_email_opens,
+        total_email_clicks=total_email_clicks,
+        first_viewed_at=timestamps.first_viewed_at if timestamps else None,
+        last_activity_at=timestamps.last_activity_at if timestamps else None,
+        recent_activity=recent_activity
+    )

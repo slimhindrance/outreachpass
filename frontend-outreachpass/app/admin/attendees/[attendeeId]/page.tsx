@@ -15,6 +15,11 @@ import {
   Send,
   Edit,
   Trash2,
+  Eye,
+  Smartphone,
+  Chrome,
+  Monitor,
+  Clock,
 } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -29,6 +34,16 @@ export default function AttendeeDetailPage() {
     queryKey: ['attendee', attendeeId],
     queryFn: async () => await apiClient.get<Attendee>(`/admin/attendees/${attendeeId}`),
     enabled: !!attendeeId,
+  });
+
+  // Fetch card analytics if card_id exists
+  const { data: analytics } = useQuery({
+    queryKey: ['card-analytics', attendee?.card_id],
+    queryFn: async () => {
+      if (!attendee?.card_id) return null;
+      return await apiClient.get(`/api/analytics/cards/${attendee.card_id}?days=365`);
+    },
+    enabled: !!attendee?.card_id,
   });
 
   const generatePassMutation = useMutation({
@@ -267,6 +282,75 @@ export default function AttendeeDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Recent Activity Timeline */}
+          {attendee.card_id && analytics?.recent_activity && analytics.recent_activity.length > 0 && (
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-4">Recent Activity</h2>
+              <div className="flow-root">
+                <ul className="-mb-8">
+                  {analytics.recent_activity.map((event: any, eventIdx: number) => (
+                    <li key={eventIdx}>
+                      <div className="relative pb-8">
+                        {eventIdx !== analytics.recent_activity.length - 1 ? (
+                          <span
+                            className="absolute left-4 top-4 -ml-px h-full w-0.5 bg-gray-200"
+                            aria-hidden="true"
+                          />
+                        ) : null}
+                        <div className="relative flex space-x-3">
+                          <div>
+                            <span className="h-8 w-8 rounded-full bg-brand-primary/10 flex items-center justify-center ring-4 ring-white">
+                              {event.event_name === 'card_viewed' && (
+                                <Eye className="h-4 w-4 text-brand-primary" />
+                              )}
+                              {event.event_name === 'vcard_downloaded' && (
+                                <Download className="h-4 w-4 text-blue-600" />
+                              )}
+                              {(event.event_name === 'apple_wallet_generated' ||
+                                event.event_name === 'google_wallet_generated') && (
+                                <Smartphone className="h-4 w-4 text-green-600" />
+                              )}
+                              {event.event_name === 'email_opened' && (
+                                <Mail className="h-4 w-4 text-purple-600" />
+                              )}
+                              {event.event_name === 'email_clicked' && (
+                                <Chrome className="h-4 w-4 text-indigo-600" />
+                              )}
+                            </span>
+                          </div>
+                          <div className="flex min-w-0 flex-1 justify-between space-x-4 pt-1.5">
+                            <div>
+                              <p className="text-sm text-gray-900 font-medium">
+                                {event.event_name
+                                  .replace(/_/g, ' ')
+                                  .replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                              </p>
+                              {event.device_type && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {event.device_type} · {event.os || 'Unknown OS'} · {event.browser || 'Unknown Browser'}
+                                </p>
+                              )}
+                            </div>
+                            <div className="whitespace-nowrap text-right text-sm text-gray-500">
+                              <time dateTime={event.occurred_at}>
+                                {new Date(event.occurred_at).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </time>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}
@@ -302,20 +386,76 @@ export default function AttendeeDetailPage() {
           {/* Activity Summary */}
           <div className="bg-white shadow rounded-lg p-6">
             <h2 className="text-lg font-medium text-gray-900 mb-4">Activity Summary</h2>
-            <dl className="space-y-3">
-              <div>
-                <dt className="text-sm text-gray-500">Total Scans</dt>
-                <dd className="text-2xl font-bold text-gray-900">0</dd>
-              </div>
-              <div>
-                <dt className="text-sm text-gray-500">Connections Made</dt>
-                <dd className="text-2xl font-bold text-gray-900">0</dd>
-              </div>
-              <div>
-                <dt className="text-sm text-gray-500">Last Activity</dt>
-                <dd className="text-sm text-gray-900">Never</dd>
-              </div>
-            </dl>
+            {attendee.card_id && analytics ? (
+              <dl className="space-y-4">
+                <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+                  <dt className="text-sm text-gray-600">Card Views</dt>
+                  <dd className="text-2xl font-bold text-brand-primary">{analytics.total_views}</dd>
+                </div>
+                <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+                  <dt className="text-sm text-gray-600">Contact Downloads</dt>
+                  <dd className="text-2xl font-bold text-blue-600">{analytics.total_vcard_downloads}</dd>
+                </div>
+                <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+                  <dt className="text-sm text-gray-600">Wallet Adds</dt>
+                  <dd className="text-2xl font-bold text-green-600">{analytics.total_wallet_adds}</dd>
+                </div>
+                <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+                  <dt className="text-sm text-gray-600">Email Opens</dt>
+                  <dd className="text-2xl font-bold text-purple-600">{analytics.total_email_opens}</dd>
+                </div>
+                <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+                  <dt className="text-sm text-gray-600">Email Clicks</dt>
+                  <dd className="text-2xl font-bold text-indigo-600">{analytics.total_email_clicks}</dd>
+                </div>
+                <div className="pt-2">
+                  <dt className="text-xs text-gray-500 mb-1">First Viewed</dt>
+                  <dd className="text-sm text-gray-900">
+                    {analytics.first_viewed_at
+                      ? new Date(analytics.first_viewed_at).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })
+                      : 'Never'}
+                  </dd>
+                  <dt className="text-xs text-gray-500 mb-1 mt-3">Last Activity</dt>
+                  <dd className="text-sm text-gray-900">
+                    {analytics.last_activity_at
+                      ? new Date(analytics.last_activity_at).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })
+                      : 'Never'}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <dl className="space-y-3">
+                <div>
+                  <dt className="text-sm text-gray-500">Card Views</dt>
+                  <dd className="text-2xl font-bold text-gray-900">0</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-gray-500">Contact Downloads</dt>
+                  <dd className="text-2xl font-bold text-gray-900">0</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-gray-500">Last Activity</dt>
+                  <dd className="text-sm text-gray-900">Never</dd>
+                </div>
+                {!attendee.card_id && (
+                  <p className="text-xs text-gray-500 mt-2 italic">
+                    Generate a pass to start tracking activity
+                  </p>
+                )}
+              </dl>
+            )}
           </div>
 
           {/* Additional Info */}
