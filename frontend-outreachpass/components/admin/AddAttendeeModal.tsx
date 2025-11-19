@@ -10,8 +10,8 @@ interface AddAttendeeModalProps {
 }
 
 export interface AttendeeFormData {
-  first_name: string;
-  last_name: string;
+  first_name?: string;
+  last_name?: string;
   email?: string;
   phone?: string;
   org_name?: string;
@@ -36,22 +36,35 @@ export function AddAttendeeModal({ isOpen, onClose, onAdd }: AddAttendeeModalPro
     e.preventDefault();
     setError(null);
 
-    // Validate that at least first name and last name are provided
-    if (!formData.first_name.trim() || !formData.last_name.trim()) {
-      setError('First name and last name are required');
-      return;
+    // Validate email format if provided
+    if (formData.email?.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(formData.email.trim())) {
+        setError('Please enter a valid email address');
+        return;
+      }
     }
 
-    // Validate that at least email or phone is provided
-    if (!formData.email?.trim() && !formData.phone?.trim()) {
-      setError('At least one contact method (email or phone) is required');
-      return;
+    // Validate LinkedIn URL format if provided
+    if (formData.linkedin_url?.trim()) {
+      try {
+        new URL(formData.linkedin_url.trim());
+      } catch {
+        setError('Please enter a valid LinkedIn URL');
+        return;
+      }
     }
 
     setIsSubmitting(true);
 
     try {
-      await onAdd(formData);
+      // Filter out empty string values - send only fields with actual content
+      const cleanedData = Object.fromEntries(
+        Object.entries(formData).filter(([_, value]) => value?.trim())
+      ) as AttendeeFormData;
+
+      await onAdd(cleanedData);
+
       // Reset form on success
       setFormData({
         first_name: '',
@@ -64,7 +77,14 @@ export function AddAttendeeModal({ isOpen, onClose, onAdd }: AddAttendeeModalPro
       });
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Failed to add attendee');
+      // Handle specific API errors
+      if (err.response?.status === 409) {
+        setError('An attendee with this email already exists for this event');
+      } else if (err.response?.status === 422) {
+        setError(err.response?.data?.detail || 'Invalid data provided');
+      } else {
+        setError(err.message || 'Failed to add attendee. Please try again.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -111,11 +131,10 @@ export function AddAttendeeModal({ isOpen, onClose, onAdd }: AddAttendeeModalPro
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                First Name <span className="text-red-500">*</span>
+                First Name
               </label>
               <input
                 type="text"
-                required
                 value={formData.first_name}
                 onChange={(e) => handleChange('first_name', e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-transparent"
@@ -124,11 +143,10 @@ export function AddAttendeeModal({ isOpen, onClose, onAdd }: AddAttendeeModalPro
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Last Name <span className="text-red-500">*</span>
+                Last Name
               </label>
               <input
                 type="text"
-                required
                 value={formData.last_name}
                 onChange={(e) => handleChange('last_name', e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-transparent"
@@ -142,7 +160,7 @@ export function AddAttendeeModal({ isOpen, onClose, onAdd }: AddAttendeeModalPro
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                 <Mail className="h-4 w-4" />
-                Email
+                Email <span className="text-xs text-gray-500 font-normal">(recommended)</span>
               </label>
               <input
                 type="email"
@@ -151,6 +169,9 @@ export function AddAttendeeModal({ isOpen, onClose, onAdd }: AddAttendeeModalPro
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-primary focus:border-transparent"
                 placeholder="john.doe@example.com"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Required for card/vCard generation and portal access
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
@@ -166,10 +187,6 @@ export function AddAttendeeModal({ isOpen, onClose, onAdd }: AddAttendeeModalPro
               />
             </div>
           </div>
-
-          <p className="text-xs text-gray-500">
-            * At least one contact method (email or phone) is required
-          </p>
 
           {/* Organization Fields */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -15,6 +15,7 @@ import {
   Edit,
   Download,
   BarChart3,
+  UserPlus,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { useParams } from 'next/navigation';
@@ -28,12 +29,14 @@ import { MetricsCards } from '@/components/analytics/MetricsCards';
 import { TimeSeriesChart } from '@/components/analytics/TimeSeriesChart';
 import { DeviceBreakdownCharts } from '@/components/analytics/DeviceBreakdownCharts';
 import { ConversionFunnel } from '@/components/analytics/ConversionFunnel';
+import { AddAttendeeModal, AttendeeFormData } from '@/components/admin/AddAttendeeModal';
 
 export default function EventDetailPage() {
   const params = useParams();
   const eventId = params?.eventId as string;
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'details' | 'attendees' | 'analytics' | 'settings'>('details');
+  const [isAddAttendeeModalOpen, setIsAddAttendeeModalOpen] = useState(false);
 
   const { data: event, isLoading } = useQuery<Event>({
     queryKey: ['event', eventId],
@@ -66,6 +69,15 @@ export default function EventDetailPage() {
     },
   });
 
+  const createAttendeeMutation = useMutation({
+    mutationFn: async (data: AttendeeFormData) => {
+      return await apiClient.post(`/admin/events/${eventId}/attendees`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['event-attendees', eventId] });
+    },
+  });
+
   const handleStatusChange = (status: string) => {
     updateEventMutation.mutate({ status: status as 'draft' | 'active' | 'completed' | 'cancelled' });
   };
@@ -74,6 +86,10 @@ export default function EventDetailPage() {
     if (window.confirm('Are you sure you want to delete this event? This action cannot be undone.')) {
       deleteEventMutation.mutate();
     }
+  };
+
+  const handleAddAttendee = async (attendeeData: AttendeeFormData) => {
+    await createAttendeeMutation.mutateAsync(attendeeData);
   };
 
   const downloadAttendeeList = () => {
@@ -328,13 +344,22 @@ export default function EventDetailPage() {
             <h2 className="text-lg font-medium text-gray-900">
               Attendees ({attendees?.length || 0})
             </h2>
-            <button
-              onClick={downloadAttendeeList}
-              className="inline-flex items-center px-4 py-2 bg-brand-primary text-white rounded-lg hover:bg-brand-primary/90"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsAddAttendeeModalOpen(true)}
+                className="inline-flex items-center px-4 py-2 bg-brand-primary text-white rounded-lg hover:bg-brand-primary/90"
+              >
+                <UserPlus className="h-4 w-4 mr-2" />
+                Add Attendee
+              </button>
+              <button
+                onClick={downloadAttendeeList}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export
+              </button>
+            </div>
           </div>
           {attendees && attendees.length > 0 ? (
             <table className="min-w-full divide-y divide-gray-200">
@@ -458,6 +483,13 @@ export default function EventDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Add Attendee Modal */}
+      <AddAttendeeModal
+        isOpen={isAddAttendeeModalOpen}
+        onClose={() => setIsAddAttendeeModalOpen(false)}
+        onAdd={handleAddAttendee}
+      />
     </div>
   );
 }
