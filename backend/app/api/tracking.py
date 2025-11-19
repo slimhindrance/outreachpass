@@ -13,17 +13,14 @@ from sqlalchemy import select
 from typing import Optional
 import uuid
 
-from app.core.database import get_db
-from app.models.database import Card, EmailEvent
+from datetime import datetime, timedelta
+
+from app.core.database import get_db, AsyncSessionLocal
+from app.models.database import Card, EmailEvent, MessageContext
 from app.services.analytics_service import AnalyticsService
 
 
 router = APIRouter(prefix="/track", tags=["tracking"])
-
-
-# In-memory message_id to context mapping (for MVP)
-# In production, this should be Redis or database table
-_message_cache = {}
 
 
 def store_message_context(
@@ -34,19 +31,52 @@ def store_message_context(
     attendee_id: Optional[uuid.UUID] = None,
     recipient_email: str = ""
 ):
-    """Store message context for tracking correlation"""
-    _message_cache[message_id] = {
-        "card_id": card_id,
-        "tenant_id": tenant_id,
-        "event_id": event_id,
-        "attendee_id": attendee_id,
-        "recipient_email": recipient_email
-    }
+    """
+    Store message context for tracking correlation in database
+
+    Note: This is a synchronous function that uses asyncio.run for database operations.
+    It's called from synchronous email sending code.
+    """
+    import asyncio
+    from datetime import datetime
+
+    async def _store():
+        async with AsyncSessionLocal() as db:
+            context = MessageContext(
+                message_id=message_id,
+                card_id=card_id,
+                tenant_id=tenant_id,
+                event_id=event_id,
+                attendee_id=attendee_id,
+                recipient_email=recipient_email,
+                expires_at=datetime.utcnow() + timedelta(days=7)
+            )
+            db.add(context)
+            await db.commit()
+
+    try:
+        asyncio.run(_store())
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to store message context: {str(e)}")
 
 
-def get_message_context(message_id: str) -> Optional[dict]:
-    """Retrieve message context from cache"""
-    return _message_cache.get(message_id)
+async def get_message_context(message_id: str, db: AsyncSession) -> Optional[dict]:
+    """Retrieve message context from database"""
+    result = await db.execute(
+        select(MessageContext).where(MessageContext.message_id == message_id)
+    )
+    context = result.scalar_one_or_none()
+
+    if context:
+        return {
+            "card_id": context.card_id,
+            "tenant_id": context.tenant_id,
+            "event_id": context.event_id,
+            "attendee_id": context.attendee_id,
+            "recipient_email": context.recipient_email
+        }
+    return None
 
 
 @router.get("/email/open/{message_id}")
@@ -70,8 +100,8 @@ async def track_email_open(
     Returns:
         1x1 transparent GIF image
     """
-    # Get message context
-    context = get_message_context(message_id)
+    # Get message context from database
+    context = await get_message_context(message_id, db)
 
     if context:
         try:
@@ -142,8 +172,8 @@ async def track_email_click(
     Returns:
         Redirect to the target URL
     """
-    # Get message context
-    context = get_message_context(mid)
+    # Get message context from database
+    context = await get_message_context(mid, db)
 
     if context:
         try:
@@ -241,10 +271,17 @@ async def track_wallet_add(
 
 
 @router.get("/health")
-async def tracking_health():
+async def tracking_health(db: AsyncSession = Depends(get_db)):
     """Health check endpoint for tracking service"""
+    # Count message contexts in database
+    from sqlalchemy import func as sql_func
+    result = await db.execute(
+        select(sql_func.count()).select_from(MessageContext)
+    )
+    message_count = result.scalar()
+
     return {
         "status": "healthy",
         "service": "tracking",
-        "cached_messages": len(_message_cache)
+        "stored_messages": message_count
     }

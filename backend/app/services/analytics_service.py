@@ -13,8 +13,11 @@ from fastapi import Request
 
 from app.models.database import (
     CardViewEvent, EmailEvent, WalletPassEvent,
-    ContactExportEvent, Card, Event, Attendee, Tenant
+    ContactExportEvent, Card, Event, Attendee, Tenant, AnalyticsEvent
 )
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class AnalyticsService:
@@ -67,6 +70,16 @@ class AnalyticsService:
         await db.commit()
         await db.refresh(view_event)
 
+        logger.info(
+            "Card view tracked",
+            extra={"extra_fields": {
+                "card_id": str(card.card_id),
+                "event_id": str(event_id) if event_id else None,
+                "source_type": source_type,
+                "device_type": device_info.get("device_type")
+            }}
+        )
+
         return view_event
 
     @staticmethod
@@ -117,6 +130,16 @@ class AnalyticsService:
         await db.commit()
         await db.refresh(email_event)
 
+        logger.info(
+            "Email event tracked",
+            extra={"extra_fields": {
+                "message_id": message_id,
+                "event_type": event_type,
+                "card_id": str(card_id) if card_id else None,
+                "recipient_email": recipient_email
+            }}
+        )
+
         return email_event
 
     @staticmethod
@@ -160,6 +183,16 @@ class AnalyticsService:
         await db.commit()
         await db.refresh(wallet_event)
 
+        logger.info(
+            "Wallet event tracked",
+            extra={"extra_fields": {
+                "card_id": str(card.card_id),
+                "event_id": str(event_id),
+                "platform": platform,
+                "event_type": event_type
+            }}
+        )
+
         return wallet_event
 
     @staticmethod
@@ -199,6 +232,16 @@ class AnalyticsService:
         db.add(export_event)
         await db.commit()
         await db.refresh(export_event)
+
+        logger.info(
+            "Contact export tracked",
+            extra={"extra_fields": {
+                "card_id": str(card.card_id),
+                "event_id": str(event_id) if event_id else None,
+                "export_type": export_type,
+                "device_type": device_info.get("device_type")
+            }}
+        )
 
         return export_event
 
@@ -490,9 +533,7 @@ class AnalyticsService:
     @staticmethod
     def _parse_user_agent(user_agent_str: str) -> Dict[str, Optional[str]]:
         """
-        Parse user agent string for device type, browser, and OS
-
-        This is a simplified version. For production, use the user-agents library.
+        Parse user agent string for device type, browser, and OS using user-agents library
 
         Args:
             user_agent_str: User agent string from request headers
@@ -500,42 +541,31 @@ class AnalyticsService:
         Returns:
             Dictionary with device_type, browser, os
         """
+        from user_agents import parse
+
         if not user_agent_str:
             return {"device_type": None, "browser": None, "os": None}
 
-        ua_lower = user_agent_str.lower()
+        # Parse user agent with user-agents library
+        ua = parse(user_agent_str)
 
         # Device type detection
-        if "mobile" in ua_lower or "android" in ua_lower or "iphone" in ua_lower:
+        if ua.is_mobile:
             device_type = "mobile"
-        elif "tablet" in ua_lower or "ipad" in ua_lower:
+        elif ua.is_tablet:
             device_type = "tablet"
-        else:
+        elif ua.is_pc:
             device_type = "desktop"
+        elif ua.is_bot:
+            device_type = "bot"
+        else:
+            device_type = "unknown"
 
         # Browser detection
-        if "chrome" in ua_lower and "edge" not in ua_lower:
-            browser = "Chrome"
-        elif "safari" in ua_lower and "chrome" not in ua_lower:
-            browser = "Safari"
-        elif "firefox" in ua_lower:
-            browser = "Firefox"
-        elif "edge" in ua_lower:
-            browser = "Edge"
-        else:
-            browser = "Other"
+        browser = ua.browser.family if ua.browser.family else "Unknown"
 
         # OS detection
-        if "windows" in ua_lower:
-            os = "Windows"
-        elif "mac" in ua_lower or "iphone" in ua_lower or "ipad" in ua_lower:
-            os = "macOS/iOS"
-        elif "android" in ua_lower:
-            os = "Android"
-        elif "linux" in ua_lower:
-            os = "Linux"
-        else:
-            os = "Other"
+        os = ua.os.family if ua.os.family else "Unknown"
 
         return {
             "device_type": device_type,

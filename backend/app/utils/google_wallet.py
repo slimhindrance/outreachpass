@@ -160,7 +160,7 @@ class GoogleWalletPassGenerator:
             object_resource = {
                 "id": full_object_id,
                 "classId": full_class_id,
-                "state": "ACTIVE",
+                "state": "active",  # Google Wallet API returns lowercase
                 "ticketHolderName": attendee_name,
                 "eventName": {
                     "defaultValue": {
@@ -212,10 +212,10 @@ class GoogleWalletPassGenerator:
                 response_data = response.json() if response.text else {}
                 logger.info(f"Created event pass object: {full_object_id}")
                 logger.info(f"Google API response: {response_data}")
-                # Check if object state is ACTIVE
+                # Check if object state is active (Google API returns lowercase)
                 state = response_data.get('state', 'UNKNOWN')
-                if state != 'ACTIVE':
-                    logger.warning(f"Pass object state is {state}, not ACTIVE. This may prevent users from adding it.")
+                if state != 'active':
+                    logger.warning(f"Pass object state is {state}, not active. This may prevent users from adding it.")
                 return full_object_id
             elif response.status_code == 409:
                 # Object already exists - update it

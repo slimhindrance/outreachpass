@@ -40,7 +40,22 @@ async def seed_database(session: AsyncSession) -> dict:
                 "theme_json": {
                     "primary_color": "#4F46E5",
                     "secondary_color": "#06B6D4",
-                    "logo_url": ""
+                    "text_color": "#1F2937",
+                    "logo_url": "",
+                    "apple_wallet": {
+                        "background_color": "#4F46E5",
+                        "foreground_color": "#FFFFFF",
+                        "label_color": "#E5E7EB",
+                        "logo_url": "",
+                        "icon_url": "",
+                        "strip_image_url": ""
+                    },
+                    "google_wallet": {
+                        "background_color": "#4F46E5",
+                        "text_color": "#FFFFFF",
+                        "logo_url": "",
+                        "hero_image_url": ""
+                    }
                 },
                 "features_json": {
                     "wallet_passes": True,
@@ -56,7 +71,22 @@ async def seed_database(session: AsyncSession) -> dict:
                 "theme_json": {
                     "primary_color": "#1E40AF",
                     "secondary_color": "#059669",
-                    "logo_url": ""
+                    "text_color": "#1F2937",
+                    "logo_url": "",
+                    "apple_wallet": {
+                        "background_color": "#1E40AF",
+                        "foreground_color": "#FFFFFF",
+                        "label_color": "#DBEAFE",
+                        "logo_url": "",
+                        "icon_url": "",
+                        "strip_image_url": ""
+                    },
+                    "google_wallet": {
+                        "background_color": "#1E40AF",
+                        "text_color": "#FFFFFF",
+                        "logo_url": "",
+                        "hero_image_url": ""
+                    }
                 },
                 "features_json": {
                     "wallet_passes": True,
@@ -71,7 +101,22 @@ async def seed_database(session: AsyncSession) -> dict:
                 "theme_json": {
                     "primary_color": "#7C3AED",
                     "secondary_color": "#F59E0B",
-                    "logo_url": ""
+                    "text_color": "#1F2937",
+                    "logo_url": "",
+                    "apple_wallet": {
+                        "background_color": "#7C3AED",
+                        "foreground_color": "#FFFFFF",
+                        "label_color": "#EDE9FE",
+                        "logo_url": "",
+                        "icon_url": "",
+                        "strip_image_url": ""
+                    },
+                    "google_wallet": {
+                        "background_color": "#7C3AED",
+                        "text_color": "#FFFFFF",
+                        "logo_url": "",
+                        "hero_image_url": ""
+                    }
                 },
                 "features_json": {
                     "wallet_passes": True,

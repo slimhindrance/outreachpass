@@ -75,6 +75,9 @@ class EmailClient:
         qr_url: str,
         wallet_passes: Optional[List] = None,
         vcard_url: Optional[str] = None,
+        # Brand customization
+        brand_name: Optional[str] = None,
+        brand_theme: Optional[dict] = None,
         # Tracking parameters
         card_id: Optional[uuid.UUID] = None,
         tenant_id: Optional[uuid.UUID] = None,
@@ -82,8 +85,25 @@ class EmailClient:
         attendee_id: Optional[uuid.UUID] = None,
         db: Optional[any] = None
     ) -> bool:
-        """Send pass issuance email with optional wallet passes"""
+        """Send pass issuance email with optional wallet passes and brand customization"""
         logger.info(f"send_pass_email called for {to_email}, event: {event_name}, wallet_passes: {len(wallet_passes) if wallet_passes else 0}")
+
+        # Extract brand colors for email styling
+        primary_color = "#0066cc"  # Default blue
+        secondary_color = "#28a745"  # Default green
+        text_color = "#333"
+        light_text_color = "#555"
+        sender_name = brand_name or "OutreachPass"
+
+        if brand_theme:
+            # Primary button color
+            primary_color = brand_theme.get('primary_color', primary_color)
+            # VCard download button color
+            secondary_color = brand_theme.get('secondary_color', secondary_color)
+            # Text colors
+            text_color = brand_theme.get('text_color', text_color)
+            # Lighter text for body
+            light_text_color = brand_theme.get('light_text_color', light_text_color)
 
         subject = f"Your {event_name} Digital Contact Card"
 
@@ -106,25 +126,8 @@ class EmailClient:
                 logger.warning(f"Failed to store message context: {str(e)}")
 
         # Track email sent event (if db session provided)
-        if db and tenant_id:
-            try:
-                from app.services.analytics_service import AnalyticsService
-                import asyncio
-                asyncio.create_task(
-                    AnalyticsService.track_email_event(
-                        db=db,
-                        tenant_id=tenant_id,
-                        message_id=message_id,
-                        recipient_email=to_email,
-                        event_type="sent",
-                        card_id=card_id,
-                        event_id=event_id,
-                        attendee_id=attendee_id,
-                        request=None
-                    )
-                )
-            except Exception as e:
-                logger.warning(f"Failed to track email sent event: {str(e)}")
+        # Note: Analytics tracking is handled by the async caller if needed
+        # This synchronous function cannot use await for analytics tracking
 
         # Helper function to wrap URLs with click tracking
         def wrap_url(url: str, link_type: str) -> str:
@@ -159,15 +162,17 @@ Access your card: {card_url}
 Share your contact info instantly by showing your QR code or sharing your link.
 
 Best regards,
-The OutreachPass Team
+The {sender_name} Team
 """
 
         # Build wallet pass buttons for HTML email
         wallet_buttons = ""
         if wallet_passes:
             for wallet_pass in wallet_passes:
-                tracked_wallet_url = wrap_url(wallet_pass.url, "wallet")
+                # IMPORTANT: Google Wallet URLs are JWT-signed and MUST NOT be wrapped/redirected
+                # Apple Wallet URLs can use tracking since they're direct .pkpass downloads
                 if wallet_pass.type == "apple":
+                    tracked_wallet_url = wrap_url(wallet_pass.url, "wallet")
                     wallet_buttons += f"""
     <p style="margin-top: 20px;">
         <a href="{tracked_wallet_url}" style="background-color: #000000; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600;">
@@ -176,26 +181,26 @@ The OutreachPass Team
         </a>
     </p>"""
                 elif wallet_pass.type == "google":
+                    # Use direct URL - Google Wallet JWT-signed URLs cannot be redirected
                     wallet_buttons += f"""
     <p style="margin-top: 20px;">
-        <a href="{tracked_wallet_url}" style="background-color: #1a73e8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-family: Arial, sans-serif;">
+        <a href="{wallet_pass.url}" style="background-color: #1a73e8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-family: Arial, sans-serif;">
             📱 Add to Google Wallet
         </a>
     </p>"""
 
-        # Build VCard download button for HTML email
+        # Build VCard download button for HTML email (tracking disabled for reliability)
         vcard_button = ""
         if vcard_url:
-            tracked_vcard_url = wrap_url(vcard_url, "vcard")
             vcard_button = f"""
     <p style="margin-top: 20px;">
-        <a href="{tracked_vcard_url}" style="background-color: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: 600;">
+        <a href="{vcard_url}" style="background-color: {secondary_color}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: 600;">
             📥 Download Contact Card (.vcf)
         </a>
     </p>"""
 
-        # Wrap card URL with tracking
-        tracked_card_url = wrap_url(card_url, "card")
+        # Use direct card URL (tracking disabled for reliability)
+        tracked_card_url = card_url
 
         # Generate tracking pixel URL
         tracking_pixel = ""
@@ -207,21 +212,21 @@ The OutreachPass Team
 <html>
 <head></head>
 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-    <h2 style="color: #333;">Hello {display_name},</h2>
-    <p style="font-size: 16px; color: #555;">Your digital contact card for <strong>{event_name}</strong> is ready!</p>
+    <h2 style="color: {text_color};">Hello {display_name},</h2>
+    <p style="font-size: 16px; color: {light_text_color};">Your digital contact card for <strong>{event_name}</strong> is ready!</p>
     <p style="margin-top: 20px;">
-        <a href="{tracked_card_url}" style="background-color: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: 600;">
+        <a href="{tracked_card_url}" style="background-color: {primary_color}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: 600;">
             Access Your Card
         </a>
     </p>
     {wallet_buttons}{vcard_button}
     <div style="margin-top: 40px; text-align: center; padding: 20px; background-color: #f5f5f5; border-radius: 8px;">
-        <h3 style="color: #333; margin-bottom: 15px;">Your Contact QR Code</h3>
+        <h3 style="color: {text_color}; margin-bottom: 15px;">Your Contact QR Code</h3>
         <p style="font-size: 14px; color: #666; margin-bottom: 15px;">Share this QR code so others can save your contact info instantly</p>
         <img src="{qr_url}" alt="Contact QR Code" style="width: 250px; height: 250px; border: 2px solid #ddd; border-radius: 8px;" />
     </div>
     <p style="margin-top: 30px; font-size: 14px; color: #777;">Share your contact info instantly by showing your QR code or sharing your link.</p>
-    <p style="margin-top: 30px; color: #666; font-size: 14px;">Best regards,<br/>The OutreachPass Team</p>
+    <p style="margin-top: 30px; color: #666; font-size: 14px;">Best regards,<br/>The {sender_name} Team</p>
     {tracking_pixel}
 </body>
 </html>

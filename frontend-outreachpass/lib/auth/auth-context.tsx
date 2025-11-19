@@ -30,6 +30,7 @@ interface AuthUser {
   username: string;
   email?: string;
   groups?: string[];
+  tenantId?: string;
 }
 
 interface AuthContextType {
@@ -53,9 +54,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function checkUser() {
     try {
       const currentUser = await getCurrentUser();
+      const session = await fetchAuthSession();
+
+      // Extract tenant_id from ID token payload
+      const idToken = session.tokens?.idToken;
+      const payload = idToken?.payload as any;
+
+      // Try different possible claim names for tenant_id
+      const tenantId = payload?.['custom:tenant_id'] ||
+                       payload?.tenant_id ||
+                       payload?.tenantId;
+
       setUser({
         username: currentUser.username,
         email: currentUser.signInDetails?.loginId,
+        tenantId,
       });
     } catch (error) {
       setUser(null);

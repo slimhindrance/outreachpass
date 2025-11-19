@@ -14,6 +14,7 @@ mkdir -p build/lambda
 # Copy application code
 echo "Copying application code..."
 cp -r backend/app build/lambda/
+cp backend/worker.py build/lambda/
 
 # Copy Google Wallet credentials if they exist
 if [ -f "backend/google-wallet-credentials.json" ]; then
@@ -41,6 +42,9 @@ pip install \
     mangum==0.17.0 \
     google-auth==2.27.0 \
     google-api-python-client==2.115.0 \
+    slowapi==0.1.9 \
+    user-agents==2.2.0 \
+    httpx==0.25.2 \
     -t build/lambda \
     --platform manylinux2014_x86_64 \
     --implementation cp \
@@ -51,7 +55,7 @@ pip install \
 # Create deployment package
 echo "Creating deployment package..."
 cd build/lambda
-zip -r ../../terraform/modules/lambda/lambda.zip . -x "*.pyc" "__pycache__/*" "*.git*"
+zip -r ../../terraform/modules/lambda/lambda.zip . -x "*.pyc" "__pycache__/*" "*.git*" "*.env" "*/.env"
 cd ../..
 
 echo "Lambda package created: terraform/modules/lambda/lambda.zip"

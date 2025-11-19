@@ -16,3 +16,13 @@ mangum==0.17.0
 google-auth==2.27.0
 google-api-python-client==2.115.0
 user-agents==2.2.0
+slowapi==0.1.9
+
+# Testing dependencies
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+faker==22.0.0
+moto[s3,sqs,ses]==4.2.9  # Mock AWS services
+freezegun==1.4.0  # Time mocking

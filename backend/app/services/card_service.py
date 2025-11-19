@@ -1,19 +1,27 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from typing import Optional, List, Dict, Any
 import uuid
-import logging
 
-from app.models.database import Card, Attendee, QRCode, Event
+from app.models.database import Card, Attendee, QRCode, Event, Brand
 from app.models.schemas import CardCreate, PassIssuanceResponse, WalletPass
 from app.utils.qr import generate_qr_code
 from app.utils.s3 import s3_client
 from app.utils.email import email_client
+from app.utils.images import fetch_brand_images
 from app.utils.apple_wallet import AppleWalletPassGenerator
 from app.utils.google_wallet import GoogleWalletPassGenerator
-
-logger = logging.getLogger(__name__)
 from app.core.config import settings
+from app.core.logging import get_logger
+from app.core.exceptions import (
+    AttendeeNotFoundError,
+    S3UploadError,
+    WalletPassGenerationError,
+    EmailDeliveryError
+)
+
+logger = get_logger(__name__)
 
 
 class CardService:
@@ -34,13 +42,22 @@ class CardService:
         attendee = result.scalar_one_or_none()
 
         if not attendee:
-            return None
+            raise AttendeeNotFoundError(attendee_id=str(attendee_id))
 
-        # Fetch event for context
+        # Fetch event
         event_result = await db.execute(
-            select(Event).where(Event.event_id == attendee.event_id)
+            select(Event)
+            .where(Event.event_id == attendee.event_id)
         )
         event = event_result.scalar_one_or_none()
+
+        # Fetch brand separately if event has one
+        brand = None
+        if event and event.brand_id:
+            brand_result = await db.execute(
+                select(Brand).where(Brand.brand_id == event.brand_id)
+            )
+            brand = brand_result.scalar_one_or_none()
 
         # Create card
         display_name = f"{attendee.first_name or ''} {attendee.last_name or ''}".strip()
@@ -96,6 +113,26 @@ class CardService:
         db.add(qr_code)
         await db.commit()
 
+        # Track QR code generation (Enhanced Analytics)
+        try:
+            from app.services.analytics_service import AnalyticsService
+            from app.models.database import AnalyticsEvent
+
+            await db.execute(
+                AnalyticsEvent.__table__.insert().values(
+                    tenant_id=attendee.tenant_id,
+                    event_type_id=attendee.event_id,
+                    event_name="qr_generated",
+                    category="delivery",
+                    card_id=card.card_id,
+                    attendee_id=attendee.attendee_id,
+                    properties={"s3_key": s3_key, "url": card_url}
+                )
+            )
+            await db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to track QR generation: {e}")
+
         # Generate wallet passes if enabled
         wallet_passes = []
 
@@ -107,6 +144,7 @@ class CardService:
                     card=card,
                     attendee=attendee,
                     event=event,
+                    brand=brand,
                     card_url=card_url,
                     base_domain=base_domain
                 )
@@ -114,7 +152,15 @@ class CardService:
                     wallet_passes.append(apple_wallet_pass)
             except Exception as e:
                 # Log wallet pass generation failure but don't fail card creation
-                logger.warning(f"Failed to generate Apple Wallet pass: {str(e)}")
+                logger.warning(
+                    "Failed to generate Apple Wallet pass",
+                    exc_info=True,
+                    extra={"extra_fields": {
+                        "card_id": str(card.card_id),
+                        "attendee_id": str(attendee.attendee_id),
+                        "error": str(e)
+                    }}
+                )
 
         # Google Wallet pass
         if settings.GOOGLE_WALLET_ENABLED and event:
@@ -124,6 +170,7 @@ class CardService:
                     card=card,
                     attendee=attendee,
                     event=event,
+                    brand=brand,
                     card_url=card_url,
                     base_domain=base_domain
                 )
@@ -131,20 +178,38 @@ class CardService:
                     wallet_passes.append(google_wallet_pass)
             except Exception as e:
                 # Log wallet pass generation failure but don't fail card creation
-                logger.warning(f"Failed to generate Google Wallet pass: {str(e)}")
+                logger.warning(
+                    "Failed to generate Google Wallet pass",
+                    exc_info=True,
+                    extra={"extra_fields": {
+                        "card_id": str(card.card_id),
+                        "attendee_id": str(attendee.attendee_id),
+                        "error": str(e)
+                    }}
+                )
 
         # Send email if attendee has email (non-blocking)
         if attendee.email and event:
             try:
+                # Extract brand information for email customization
+                brand_name = brand.display_name if brand else None
+                brand_theme = brand.theme_json if brand else None
+
+                # Generate pre-signed URL for QR code (valid for 7 days)
+                qr_s3_url = s3_client.get_presigned_url(s3_key, expiration=604800)  # 7 days = 604800 seconds
+
                 vcard_url = f"{base_domain}/c/{card.card_id}/vcard"
-                email_client.send_pass_email(
+                email_sent = email_client.send_pass_email(
                     to_email=attendee.email,
                     display_name=display_name,
                     event_name=event.name,
                     card_url=card_url,
-                    qr_url=f"{base_domain}/qr/{card.card_id}",
+                    qr_url=qr_s3_url,
                     wallet_passes=wallet_passes,
                     vcard_url=vcard_url,
+                    # Brand customization
+                    brand_name=brand_name,
+                    brand_theme=brand_theme,
                     # Tracking parameters
                     card_id=card.card_id,
                     tenant_id=attendee.tenant_id,
@@ -152,9 +217,79 @@ class CardService:
                     attendee_id=attendee.attendee_id,
                     db=db
                 )
+
+                # Track email sent in Enhanced Analytics
+                if email_sent:
+                    try:
+                        from app.models.database import AnalyticsEvent
+                        await db.execute(
+                            AnalyticsEvent.__table__.insert().values(
+                                tenant_id=attendee.tenant_id,
+                                event_type_id=attendee.event_id,
+                                event_name="email_sent",
+                                category="delivery",
+                                card_id=card.card_id,
+                                attendee_id=attendee.attendee_id,
+                                properties={
+                                    "recipient": attendee.email,
+                                    "has_apple_wallet": any(p.type == "apple" for p in wallet_passes),
+                                    "has_google_wallet": any(p.type == "google" for p in wallet_passes),
+                                    "wallet_count": len(wallet_passes)
+                                }
+                            )
+                        )
+                        await db.commit()
+                    except Exception as e:
+                        logger.warning(f"Failed to track email in Enhanced Analytics: {e}")
+                else:
+                    # Track email failure
+                    try:
+                        from app.models.database import AnalyticsEvent
+                        await db.execute(
+                            AnalyticsEvent.__table__.insert().values(
+                                tenant_id=attendee.tenant_id,
+                                event_type_id=attendee.event_id,
+                                event_name="email_failed",
+                                category="error",
+                                card_id=card.card_id,
+                                attendee_id=attendee.attendee_id,
+                                properties={"recipient": attendee.email}
+                            )
+                        )
+                        await db.commit()
+                    except Exception as e:
+                        logger.warning(f"Failed to track email failure in Enhanced Analytics: {e}")
+
             except Exception as e:
                 # Log email failure but don't fail pass generation
-                logger.warning(f"Failed to send pass email to {attendee.email}: {str(e)}")
+                logger.warning(
+                    "Failed to send pass email",
+                    exc_info=True,
+                    extra={"extra_fields": {
+                        "recipient_email": attendee.email,
+                        "card_id": str(card.card_id),
+                        "attendee_id": str(attendee.attendee_id),
+                        "error": str(e)
+                    }}
+                )
+
+                # Track email error in Enhanced Analytics
+                try:
+                    from app.models.database import AnalyticsEvent
+                    await db.execute(
+                        AnalyticsEvent.__table__.insert().values(
+                            tenant_id=attendee.tenant_id,
+                            event_type_id=attendee.event_id if event else None,
+                            event_name="email_error",
+                            category="error",
+                            card_id=card.card_id,
+                            attendee_id=attendee.attendee_id,
+                            properties={"recipient": attendee.email, "error": str(e)}
+                        )
+                    )
+                    await db.commit()
+                except Exception as track_error:
+                    logger.warning(f"Failed to track email error in Enhanced Analytics: {track_error}")
 
         return PassIssuanceResponse(
             card_id=card.card_id,
@@ -180,6 +315,7 @@ class CardService:
         card: Card,
         attendee: Attendee,
         event: Event,
+        brand: Optional[Brand],
         card_url: str,
         base_domain: str
     ) -> Optional[WalletPass]:
@@ -199,14 +335,21 @@ class CardService:
         try:
             # Initialize Apple Wallet generator if not already done
             if not settings.APPLE_WALLET_TEAM_ID or not settings.APPLE_WALLET_PASS_TYPE_ID:
-                logger.warning("Apple Wallet not fully configured - skipping pass generation")
+                logger.warning(
+                    "Apple Wallet not fully configured - skipping pass generation",
+                    extra={"extra_fields": {"card_id": str(card.card_id)}}
+                )
                 return None
 
-            # Create generator instance
+            # Extract brand information for customization
+            brand_name = brand.display_name if brand else settings.APPLE_WALLET_ORGANIZATION_NAME
+            brand_theme = brand.theme_json if brand else {}
+
+            # Create generator instance with brand name
             generator = AppleWalletPassGenerator(
                 team_id=settings.APPLE_WALLET_TEAM_ID,
                 pass_type_id=settings.APPLE_WALLET_PASS_TYPE_ID,
-                organization_name=settings.APPLE_WALLET_ORGANIZATION_NAME,
+                organization_name=brand_name,
                 cert_path=settings.APPLE_WALLET_CERT_PATH,
                 key_path=settings.APPLE_WALLET_KEY_PATH,
                 wwdr_cert_path=settings.APPLE_WALLET_WWDR_CERT_PATH
@@ -230,17 +373,31 @@ class CardService:
             if not display_name:
                 display_name = attendee.email or "Attendee"
 
+            # Extract brand colors for wallet pass styling
+            apple_wallet_theme = brand_theme.get('apple_wallet', {})
+            background_color = apple_wallet_theme.get('background_color') or brand_theme.get('primary_color', '#1E40AF')
+            foreground_color = apple_wallet_theme.get('foreground_color', '#FFFFFF')
+            label_color = apple_wallet_theme.get('label_color', '#E5E7EB')
+
+            # Fetch brand images from URLs (if configured)
+            brand_images = await fetch_brand_images(brand_theme, wallet_type='apple')
+            logo_image = brand_images.get('logo')
+            icon_image = brand_images.get('icon')
+            strip_image = brand_images.get('strip')
+
             pkpass_bytes = generator.create_event_pass(
                 serial_number=str(card.card_id),
                 attendee_name=display_name,
                 event_name=event.name,
                 event_date=event.starts_at,
                 qr_code_url=card_url,
+                background_color=background_color,
+                foreground_color=foreground_color,
+                label_color=label_color,
                 additional_fields=additional_fields,
-                # TODO: Add actual logo/icon/strip images from S3 or config
-                logo_image=None,
-                icon_image=None,
-                strip_image=None
+                logo_image=logo_image,
+                icon_image=icon_image,
+                strip_image=strip_image
             )
 
             # Upload .pkpass file to S3
@@ -254,9 +411,16 @@ class CardService:
             # Generate public download URL
             pkpass_url = f"{base_domain}/api/v1/passes/apple/{card.card_id}"
 
-            logger.info(f"Generated Apple Wallet pass for card {card.card_id}")
+            logger.info(
+                "Generated Apple Wallet pass",
+                extra={"extra_fields": {
+                    "card_id": str(card.card_id),
+                    "event_id": str(event.event_id),
+                    "s3_key": pkpass_s3_key
+                }}
+            )
 
-            # Track wallet pass generation
+            # Track wallet pass generation (legacy table)
             try:
                 from app.services.analytics_service import AnalyticsService
                 await AnalyticsService.track_wallet_event(
@@ -268,7 +432,28 @@ class CardService:
                     request=None
                 )
             except Exception as e:
-                logger.warning(f"Failed to track Apple Wallet pass generation: {str(e)}")
+                logger.warning(
+                    "Failed to track Apple Wallet pass generation",
+                    extra={"extra_fields": {"card_id": str(card.card_id), "error": str(e)}}
+                )
+
+            # Track in Enhanced Analytics
+            try:
+                from app.models.database import AnalyticsEvent
+                await db.execute(
+                    AnalyticsEvent.__table__.insert().values(
+                        tenant_id=attendee.tenant_id,
+                        event_type_id=event.event_id,
+                        event_name="apple_wallet_generated",
+                        category="delivery",
+                        card_id=card.card_id,
+                        attendee_id=attendee.attendee_id,
+                        properties={"platform": "apple", "s3_key": pkpass_s3_key}
+                    )
+                )
+                await db.commit()
+            except Exception as e:
+                logger.warning(f"Failed to track Apple Wallet in Enhanced Analytics: {e}")
 
             return WalletPass(
                 type="apple",
@@ -277,7 +462,11 @@ class CardService:
             )
 
         except Exception as e:
-            logger.error(f"Error generating Apple Wallet pass: {str(e)}", exc_info=True)
+            logger.error(
+                "Error generating Apple Wallet pass",
+                exc_info=True,
+                extra={"extra_fields": {"card_id": str(card.card_id), "error": str(e)}}
+            )
             return None
 
     @staticmethod
@@ -286,6 +475,7 @@ class CardService:
         card: Card,
         attendee: Attendee,
         event: Event,
+        brand: Optional[Brand],
         card_url: str,
         base_domain: str
     ) -> Optional[WalletPass]:
@@ -305,8 +495,14 @@ class CardService:
         try:
             # Check if Google Wallet is configured
             if not settings.GOOGLE_WALLET_ISSUER_ID or not settings.GOOGLE_WALLET_SERVICE_ACCOUNT_EMAIL:
-                logger.warning("Google Wallet not fully configured - skipping pass generation")
+                logger.warning(
+                    "Google Wallet not fully configured - skipping pass generation",
+                    extra={"extra_fields": {"card_id": str(card.card_id)}}
+                )
                 return None
+
+            # Extract brand information for customization
+            brand_name = brand.display_name if brand else "OutreachPass"
 
             # Create generator instance
             generator = GoogleWalletPassGenerator(
@@ -324,7 +520,7 @@ class CardService:
             generator.create_event_pass_class(
                 class_id=class_id,
                 event_name=event.name,
-                organization_name=settings.GOOGLE_WALLET_ORIGINS[0].split("//")[1].split(".")[0].title() if settings.GOOGLE_WALLET_ORIGINS else "OutreachPass"
+                organization_name=brand_name
             )
 
             # Prepare additional fields for the pass
@@ -360,7 +556,10 @@ class CardService:
             )
 
             if not full_object_id:
-                logger.warning("Failed to create Google Wallet pass object")
+                logger.warning(
+                    "Failed to create Google Wallet pass object",
+                    extra={"extra_fields": {"card_id": str(card.card_id), "class_id": class_id}}
+                )
                 return None
 
             # Generate the "Save to Google Wallet" link
@@ -369,9 +568,16 @@ class CardService:
                 object_id=object_id
             )
 
-            logger.info(f"Generated Google Wallet pass for card {card.card_id}")
+            logger.info(
+                "Generated Google Wallet pass",
+                extra={"extra_fields": {
+                    "card_id": str(card.card_id),
+                    "event_id": str(event.event_id),
+                    "save_url": save_url
+                }}
+            )
 
-            # Track wallet pass generation
+            # Track wallet pass generation (legacy table)
             try:
                 from app.services.analytics_service import AnalyticsService
                 await AnalyticsService.track_wallet_event(
@@ -383,7 +589,28 @@ class CardService:
                     request=None
                 )
             except Exception as e:
-                logger.warning(f"Failed to track Google Wallet pass generation: {str(e)}")
+                logger.warning(
+                    "Failed to track Google Wallet pass generation",
+                    extra={"extra_fields": {"card_id": str(card.card_id), "error": str(e)}}
+                )
+
+            # Track in Enhanced Analytics
+            try:
+                from app.models.database import AnalyticsEvent
+                await db.execute(
+                    AnalyticsEvent.__table__.insert().values(
+                        tenant_id=attendee.tenant_id,
+                        event_type_id=event.event_id,
+                        event_name="google_wallet_generated",
+                        category="delivery",
+                        card_id=card.card_id,
+                        attendee_id=attendee.attendee_id,
+                        properties={"platform": "google", "save_url": save_url}
+                    )
+                )
+                await db.commit()
+            except Exception as e:
+                logger.warning(f"Failed to track Google Wallet in Enhanced Analytics: {e}")
 
             return WalletPass(
                 type="google",
@@ -392,5 +619,9 @@ class CardService:
             )
 
         except Exception as e:
-            logger.error(f"Error generating Google Wallet pass: {str(e)}", exc_info=True)
+            logger.error(
+                "Error generating Google Wallet pass",
+                exc_info=True,
+                extra={"extra_fields": {"card_id": str(card.card_id), "error": str(e)}}
+            )
             return None

@@ -223,6 +223,27 @@ class PassGenerationJob(Base):
 # Analytics & Tracking Models
 # ============================================================================
 
+class MessageContext(Base):
+    """
+    Stores email message context for tracking correlation
+
+    Replaces in-memory cache with persistent storage that survives
+    Lambda cold starts and enables multi-Lambda tracking.
+    """
+    __tablename__ = "message_contexts"
+
+    message_id = Column(String(50), primary_key=True)
+    card_id = Column(UUID(as_uuid=True), ForeignKey("cards.card_id", ondelete="CASCADE"), nullable=False)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(UUID(as_uuid=True), ForeignKey("events.event_id", ondelete="SET NULL"))
+    attendee_id = Column(UUID(as_uuid=True), ForeignKey("attendees.attendee_id", ondelete="SET NULL"))
+    recipient_email = Column(String, nullable=False)
+
+    # TTL for cleanup (messages older than 7 days can be deleted)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)  # created_at + 7 days
+
+
 class EmailEvent(Base):
     __tablename__ = "email_events"
 
@@ -327,3 +348,55 @@ class ContactExportEvent(Base):
 
     # Additional context
     metadata_json = Column(JSONB, nullable=False, default={})
+
+
+class AnalyticsEvent(Base):
+    """
+    Unified analytics events table for enhanced dashboard
+
+    Provides flexible event tracking for all types of analytics:
+    - Pass generation and delivery
+    - User engagement (views, clicks)
+    - Conversions (downloads, wallet adds)
+    - Errors and system events
+
+    Complements the existing event-specific tables (EmailEvent, WalletPassEvent, etc.)
+    with a more flexible structure for dashboard analytics and reporting.
+    """
+    __tablename__ = "analytics_events"
+
+    # Primary key
+    event_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Tenant context (required for multi-tenant isolation)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.tenant_id", ondelete="CASCADE"), nullable=False)
+
+    # Event context (optional - some events are tenant-wide)
+    event_type_id = Column(UUID(as_uuid=True), ForeignKey("events.event_id", ondelete="CASCADE"))
+
+    # Event classification
+    event_name = Column(String(100), nullable=False)  # 'card_viewed', 'vcard_downloaded', etc.
+    category = Column(String(50), nullable=False)     # 'engagement', 'conversion', 'delivery', 'error'
+
+    # Entity references (all optional - depends on event type)
+    card_id = Column(UUID(as_uuid=True), ForeignKey("cards.card_id", ondelete="SET NULL"))
+    attendee_id = Column(UUID(as_uuid=True), ForeignKey("attendees.attendee_id", ondelete="SET NULL"))
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL"))
+
+    # Flexible properties for event-specific data (JSON)
+    properties = Column(JSONB, nullable=False, default={})
+
+    # Technical/device information
+    user_agent = Column(Text)
+    device_type = Column(String(50))
+    os = Column(String(50))
+    browser = Column(String(50))
+    ip_address = Column(INET)
+
+    # Geographic information
+    country_code = Column(String(2))
+    city = Column(String(100))
+
+    # Timing
+    occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
