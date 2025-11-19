@@ -7,6 +7,20 @@ A .pkpass file is a signed ZIP archive containing:
 - Images (icon, logo, strip, etc.)
 - manifest.json (file checksums)
 - signature (cryptographic signature)
+
+Implementation uses native Python libraries and OpenSSL for signing.
+No third-party wallet libraries required.
+
+Certificate Setup:
+1. Create Pass Type ID in Apple Developer Portal
+2. Download certificate (.cer) and convert to .pem
+3. Export private key from Keychain and convert to .pem
+4. Download Apple WWDR certificate and convert to .pem
+
+Example OpenSSL commands:
+  openssl x509 -inform DER -in pass.cer -out pass.pem
+  openssl pkcs12 -in Certificates.p12 -out key.pem -nodes
+  openssl x509 -inform DER -in AppleWWDRCA.cer -out wwdr.pem
 """
 import logging
 import json
@@ -14,18 +28,11 @@ import hashlib
 import zipfile
 import io
 import os
+import subprocess
+import tempfile
 from typing import Optional, Dict, Any
 from datetime import datetime
-
-# Conditional import for wallet library (only needed if Apple Wallet is enabled)
-try:
-    from wallet import Pass, Barcode, BarcodeFormat
-    WALLET_AVAILABLE = True
-except ImportError:
-    WALLET_AVAILABLE = False
-    Pass = None
-    Barcode = None
-    BarcodeFormat = None
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +53,12 @@ class AppleWalletPassGenerator:
         Initialize Apple Wallet pass generator
 
         Args:
-            team_id: Apple Developer Team ID (e.g., "ABC123DEF4")
-            pass_type_id: Pass Type Identifier (e.g., "pass.com.example.event")
-            organization_name: Organization name to display
-            cert_path: Path to Pass Type ID certificate (.pem)
-            key_path: Path to private key (.pem)
-            wwdr_cert_path: Path to Apple WWDR certificate (.pem)
+            team_id: Apple Developer Team ID (10 characters, e.g., "A1B2C3D4E5")
+            pass_type_id: Pass Type ID from Apple Developer (e.g., "pass.com.outreachpass.event")
+            organization_name: Organization name to display on pass
+            cert_path: Path to signing certificate (.pem file)
+            key_path: Path to private key (.pem file)
+            wwdr_cert_path: Path to Apple WWDR certificate (.pem file)
         """
         self.team_id = team_id
         self.pass_type_id = pass_type_id
@@ -59,6 +66,14 @@ class AppleWalletPassGenerator:
         self.cert_path = cert_path
         self.key_path = key_path
         self.wwdr_cert_path = wwdr_cert_path
+
+        # Validate certificate paths if provided
+        if cert_path and not os.path.exists(cert_path):
+            logger.warning(f"Certificate not found at {cert_path}")
+        if key_path and not os.path.exists(key_path):
+            logger.warning(f"Private key not found at {key_path}")
+        if wwdr_cert_path and not os.path.exists(wwdr_cert_path):
+            logger.warning(f"WWDR certificate not found at {wwdr_cert_path}")
 
     def create_event_pass(
         self,

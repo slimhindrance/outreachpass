@@ -49,7 +49,7 @@ async def process_pass_generation_job(job_id: str) -> Dict[str, Any]:
             # Update job status to processing
             job.status = "processing"
             job.started_at = job.created_at
-            await db.commit()
+            await db.flush()  # Flush instead of commit to keep transaction open
 
             # Fetch attendee
             attendee_result = await db.execute(
@@ -60,6 +60,7 @@ async def process_pass_generation_job(job_id: str) -> Dict[str, Any]:
             if not attendee:
                 job.status = "failed"
                 job.error_message = "Attendee not found"
+                await db.flush()
                 await db.commit()
                 return {"status": "error", "message": "Attendee not found"}
 
@@ -69,6 +70,7 @@ async def process_pass_generation_job(job_id: str) -> Dict[str, Any]:
                 job.status = "completed"
                 job.card_id = attendee.card_id
                 job.completed_at = job.created_at
+                await db.flush()
                 await db.commit()
                 return {"status": "success", "message": "Pass already exists", "card_id": str(attendee.card_id)}
 
@@ -82,6 +84,7 @@ async def process_pass_generation_job(job_id: str) -> Dict[str, Any]:
             if not pass_result:
                 job.status = "failed"
                 job.error_message = "Failed to generate pass"
+                await db.flush()
                 await db.commit()
                 return {"status": "error", "message": "Failed to generate pass"}
 
@@ -90,6 +93,7 @@ async def process_pass_generation_job(job_id: str) -> Dict[str, Any]:
             job.card_id = pass_result.card_id
             job.qr_url = pass_result.qr_url
             job.completed_at = job.created_at
+            await db.flush()
             await db.commit()
 
             logger.info(f"Successfully generated pass {pass_result.card_id} for job {job_id}")
@@ -108,6 +112,7 @@ async def process_pass_generation_job(job_id: str) -> Dict[str, Any]:
             if job:
                 job.status = "failed"
                 job.error_message = str(e)
+                await db.flush()
                 await db.commit()
 
             return {"status": "error", "message": str(e)}

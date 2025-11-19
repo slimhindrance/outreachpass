@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
+import os
 
 
 class Settings(BaseSettings):
@@ -9,6 +10,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "OutreachPass"
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
+    API_BASE_URL: str = "https://r2h140rt0a.execute-api.us-east-1.amazonaws.com"  # API Gateway endpoint
 
     # Database
     DATABASE_URL: str
@@ -19,6 +21,7 @@ class Settings(BaseSettings):
     AWS_REGION: str = "us-east-1"
     S3_BUCKET_ASSETS: str
     S3_BUCKET_UPLOADS: str
+    SQS_QUEUE_URL: str  # Pass generation queue
 
     # Cognito
     COGNITO_USER_POOL_ID: str
@@ -69,8 +72,8 @@ class Settings(BaseSettings):
     GOOGLE_WALLET_CLASS_SUFFIX: str = "event_pass"  # Suffix for pass class IDs (change to force new class creation)
 
     class Config:
-        env_file = ".env"
         case_sensitive = True
 
 
-settings = Settings()
+# Explicitly prevent loading .env file - only use environment variables
+settings = Settings(_env_file=None)

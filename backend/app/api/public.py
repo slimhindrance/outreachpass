@@ -2,21 +2,32 @@ from fastapi import APIRouter, Depends, HTTPException, Response, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, text
+from sqlalchemy.dialects.postgresql import insert
 from datetime import date
 import uuid
 
 from app.core.database import get_db
+from app.core.logging import get_logger
+from app.core.exceptions import CardNotFoundError, QRCodeNotFoundError, S3DownloadError
+
+logger = get_logger(__name__)
 from app.models.database import Card, ScanDaily, Event, Attendee, QRCode
 from app.models.schemas import CardResponse
 from app.utils.vcard import generate_vcard
 from app.utils.s3 import s3_client
 from app.services.analytics_service import AnalyticsService
 
+# Import limiter from main app (will be set when app initializes)
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(tags=["public"])
 
 
 @router.get("/c/{card_id}", response_class=HTMLResponse)
+@limiter.limit("60/minute")
 async def get_card_page(
     card_id: uuid.UUID,
     request: Request,
@@ -25,38 +36,41 @@ async def get_card_page(
     """Render public contact card page"""
 
     # Get card with attendee to get event_id
+    print(f"DEBUG: Looking up card {card_id}")
     result = await db.execute(
         select(Card, Attendee)
         .join(Attendee, Card.owner_attendee_id == Attendee.attendee_id, isouter=True)
         .where(Card.card_id == card_id)
     )
     row = result.first()
+    print(f"DEBUG: Query result for {card_id}: row={'found' if row else 'NOT FOUND'}")
+    print(f"DEBUG: Row type: {type(row)}, Row value: {row}")
 
     if not row:
-        raise HTTPException(status_code=404, detail="Card not found")
+        print(f"DEBUG: Card {card_id} NOT FOUND - raising CardNotFoundError")
+        raise CardNotFoundError(card_id=str(card_id))
 
     card, attendee = row
 
     # Track scan (aggregate only) - only if we have an event_id
     if attendee and attendee.event_id:
         today = date.today()
-        await db.execute(
-            text("""
-            INSERT INTO scans_daily (day, tenant_id, event_id, card_id, scan_count, vcard_downloads)
-            VALUES (:day, :tenant_id, :event_id, :card_id, 1, 0)
-            ON CONFLICT (day, tenant_id, event_id, card_id)
-            DO UPDATE SET scan_count = scans_daily.scan_count + 1
-            """),
-            {
-                "day": today,
-                "tenant_id": card.tenant_id,
-                "event_id": attendee.event_id,
-                "card_id": card.card_id
-            }
+        # Use ORM insert with on_conflict_do_update for upsert behavior
+        stmt = insert(ScanDaily).values(
+            day=today,
+            tenant_id=card.tenant_id,
+            event_id=attendee.event_id,
+            card_id=card.card_id,
+            scan_count=1,
+            vcard_downloads=0
+        ).on_conflict_do_update(
+            index_elements=['day', 'tenant_id', 'event_id', 'card_id'],
+            set_={'scan_count': ScanDaily.scan_count + 1}
         )
+        await db.execute(stmt)
         await db.commit()
 
-    # Track detailed card view event (new analytics)
+    # Track detailed card view event (legacy table)
     source_type = "qr_scan" if "qr" in request.headers.get("referer", "").lower() else "direct_link"
     try:
         await AnalyticsService.track_card_view(
@@ -68,8 +82,46 @@ async def get_card_page(
         )
     except Exception as e:
         # Don't fail the request if analytics tracking fails
-        import logging
-        logging.getLogger(__name__).warning(f"Failed to track card view: {str(e)}")
+        logger.warning(
+            "Failed to track card view",
+            exc_info=True,
+            extra={"extra_fields": {
+                "card_id": str(card_id),
+                "source_type": source_type,
+                "error": str(e)
+            }}
+        )
+
+    # Track card view in Enhanced Analytics
+    try:
+        from app.models.database import AnalyticsEvent
+
+        # Parse user agent for device detection
+        user_agent_str = request.headers.get("user-agent", "")
+        device_info = AnalyticsService._parse_user_agent(user_agent_str)
+
+        # Get IP address for geo tracking
+        ip_address = request.client.host if request.client else None
+
+        await db.execute(
+            AnalyticsEvent.__table__.insert().values(
+                tenant_id=card.tenant_id,
+                event_type_id=attendee.event_id if attendee else None,
+                event_name="card_viewed",
+                category="engagement",
+                card_id=card.card_id,
+                attendee_id=attendee.attendee_id if attendee else None,
+                user_agent=user_agent_str,
+                device_type=device_info.get("device_type"),
+                os=device_info.get("os"),
+                browser=device_info.get("browser"),
+                ip_address=ip_address,
+                properties={"source_type": source_type}
+            )
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to track card view in Enhanced Analytics: {e}")
 
     # Build simple HTML response
     links_html = ""
@@ -156,6 +208,7 @@ async def get_card_page(
 
 
 @router.get("/c/{card_id}/vcard")
+@limiter.limit("30/minute")
 async def download_vcard(
     card_id: uuid.UUID,
     request: Request,
@@ -172,7 +225,7 @@ async def download_vcard(
     row = result.first()
 
     if not row:
-        raise HTTPException(status_code=404, detail="Card not found")
+        raise CardNotFoundError(card_id=str(card_id))
 
     card, attendee = row
 
@@ -195,7 +248,7 @@ async def download_vcard(
         )
         await db.commit()
 
-    # Track contact export event (new analytics)
+    # Track contact export event (legacy table)
     try:
         await AnalyticsService.track_contact_export(
             db=db,
@@ -206,8 +259,46 @@ async def download_vcard(
         )
     except Exception as e:
         # Don't fail the request if analytics tracking fails
-        import logging
-        logging.getLogger(__name__).warning(f"Failed to track contact export: {str(e)}")
+        logger.warning(
+            "Failed to track contact export",
+            exc_info=True,
+            extra={"extra_fields": {
+                "card_id": str(card_id),
+                "export_type": "vcard_download",
+                "error": str(e)
+            }}
+        )
+
+    # Track vCard download in Enhanced Analytics
+    try:
+        from app.models.database import AnalyticsEvent
+
+        # Parse user agent for device detection
+        user_agent_str = request.headers.get("user-agent", "")
+        device_info = AnalyticsService._parse_user_agent(user_agent_str)
+
+        # Get IP address for geo tracking
+        ip_address = request.client.host if request.client else None
+
+        await db.execute(
+            AnalyticsEvent.__table__.insert().values(
+                tenant_id=card.tenant_id,
+                event_type_id=attendee.event_id if attendee else None,
+                event_name="vcard_downloaded",
+                category="conversion",
+                card_id=card.card_id,
+                attendee_id=attendee.attendee_id if attendee else None,
+                user_agent=user_agent_str,
+                device_type=device_info.get("device_type"),
+                os=device_info.get("os"),
+                browser=device_info.get("browser"),
+                ip_address=ip_address,
+                properties={"export_type": "vcard_download"}
+            )
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to track vCard download in Enhanced Analytics: {e}")
 
     # Generate VCard
     vcard_str = generate_vcard(
@@ -246,7 +337,7 @@ async def get_qr_code(
     qr_code = result.scalar_one_or_none()
 
     if not qr_code or not qr_code.s3_key_png:
-        raise HTTPException(status_code=404, detail="QR code not found")
+        raise QRCodeNotFoundError(card_id=str(card_id))
 
     # Fetch from S3
     try:
@@ -261,7 +352,7 @@ async def get_qr_code(
             }
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve QR code: {str(e)}")
+        raise S3DownloadError(key=qr_code.s3_key_png, error=str(e))
 
 
 @router.get("/api/cards/{card_id}", response_model=CardResponse)
@@ -276,6 +367,6 @@ async def get_card_api(
     card = result.scalar_one_or_none()
 
     if not card:
-        raise HTTPException(status_code=404, detail="Card not found")
+        raise CardNotFoundError(card_id=str(card_id))
 
     return card

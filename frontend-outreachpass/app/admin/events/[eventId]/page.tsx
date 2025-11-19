@@ -14,15 +14,26 @@ import {
   Trash2,
   Edit,
   Download,
+  BarChart3,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { useParams } from 'next/navigation';
+import {
+  useEventSummary,
+  useEventTimeSeries,
+  useDeviceBreakdown,
+  useConversionFunnel,
+} from '@/lib/hooks/useEnhancedAnalytics';
+import { MetricsCards } from '@/components/analytics/MetricsCards';
+import { TimeSeriesChart } from '@/components/analytics/TimeSeriesChart';
+import { DeviceBreakdownCharts } from '@/components/analytics/DeviceBreakdownCharts';
+import { ConversionFunnel } from '@/components/analytics/ConversionFunnel';
 
 export default function EventDetailPage() {
   const params = useParams();
   const eventId = params?.eventId as string;
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'details' | 'attendees' | 'settings'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'attendees' | 'analytics' | 'settings'>('details');
 
   const { data: event, isLoading } = useQuery<Event>({
     queryKey: ['event', eventId],
@@ -182,6 +193,16 @@ export default function EventDetailPage() {
             }`}
           >
             Attendees ({attendees?.length || 0})
+          </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'analytics'
+                ? 'border-brand-primary text-brand-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Analytics
           </button>
           <button
             onClick={() => setActiveTab('settings')}
@@ -374,6 +395,10 @@ export default function EventDetailPage() {
         </div>
       )}
 
+      {activeTab === 'analytics' && (
+        <EnhancedAnalyticsTab eventId={eventId} />
+      )}
+
       {activeTab === 'settings' && (
         <div className="bg-white shadow rounded-lg p-6">
           <h2 className="text-lg font-medium text-gray-900 mb-6">Event Settings</h2>
@@ -433,6 +458,77 @@ export default function EventDetailPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Enhanced Analytics Tab Component
+function EnhancedAnalyticsTab({ eventId }: { eventId: string }) {
+  const [days, setDays] = useState(30);
+  const [selectedMetric, setSelectedMetric] = useState<'views' | 'downloads' | 'wallet_adds' | 'emails_sent'>('views');
+  const [granularity, setGranularity] = useState<'hour' | 'day' | 'week'>('day');
+
+  // Fetch analytics data
+  const { data: summary, isLoading: summaryLoading } = useEventSummary(eventId, { days });
+  const { data: timeSeries, isLoading: timeSeriesLoading } = useEventTimeSeries(eventId, {
+    metric: selectedMetric,
+    granularity,
+    days,
+  });
+  const { data: devices, isLoading: devicesLoading } = useDeviceBreakdown(eventId, { days });
+  const { data: funnel, isLoading: funnelLoading } = useConversionFunnel(eventId, { days });
+
+  return (
+    <div className="space-y-6">
+      {/* Controls */}
+      <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <label className="text-sm font-medium text-gray-700">Time Period:</label>
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+          >
+            <option value={7}>Last 7 Days</option>
+            <option value={30}>Last 30 Days</option>
+            <option value={90}>Last 90 Days</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-4">
+          <label className="text-sm font-medium text-gray-700">Chart Metric:</label>
+          <select
+            value={selectedMetric}
+            onChange={(e) => setSelectedMetric(e.target.value as any)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+          >
+            <option value="views">Card Views</option>
+            <option value="downloads">vCard Downloads</option>
+            <option value="wallet_adds">Wallet Adds</option>
+            <option value="emails_sent">Emails Sent</option>
+          </select>
+          <select
+            value={granularity}
+            onChange={(e) => setGranularity(e.target.value as any)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+          >
+            <option value="hour">Hourly</option>
+            <option value="day">Daily</option>
+            <option value="week">Weekly</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Metrics Cards */}
+      {summary && <MetricsCards data={summary} loading={summaryLoading} />}
+
+      {/* Time Series Chart */}
+      {timeSeries && <TimeSeriesChart data={timeSeries} loading={timeSeriesLoading} />}
+
+      {/* Device Breakdown */}
+      {devices && <DeviceBreakdownCharts data={devices} loading={devicesLoading} />}
+
+      {/* Conversion Funnel */}
+      {funnel && <ConversionFunnel data={funnel} loading={funnelLoading} />}
     </div>
   );
 }

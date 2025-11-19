@@ -8,11 +8,12 @@ import uuid
 import json
 import boto3
 import os
-import logging
-
-logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
+from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 from app.models.database import Event, Attendee, Brand, Tenant, PassGenerationJob
 from app.models.schemas import (
     EventCreate,
@@ -36,8 +37,7 @@ sqs_config = Config(
     read_timeout=5,
     retries={'max_attempts': 2}
 )
-sqs = boto3.client('sqs', region_name=os.getenv('AWS_REGION', 'us-east-1'), config=sqs_config)
-SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/741783034843/outreachpass-pass-generation')
+sqs = boto3.client('sqs', region_name=settings.AWS_REGION, config=sqs_config)
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -381,9 +381,9 @@ async def issue_pass(
 
     # Send message to SQS queue
     try:
-        logger.info(f"Sending SQS message for job {job.job_id} to queue {SQS_QUEUE_URL}")
+        logger.info(f"Sending SQS message for job {job.job_id} to queue {settings.SQS_QUEUE_URL}")
         response = sqs.send_message(
-            QueueUrl=SQS_QUEUE_URL,
+            QueueUrl=settings.SQS_QUEUE_URL,
             MessageBody=json.dumps({
                 "job_id": str(job.job_id),
                 "attendee_id": str(attendee_id),
