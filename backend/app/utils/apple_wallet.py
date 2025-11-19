@@ -221,7 +221,7 @@ class AppleWalletPassGenerator:
             logger.error(f"Error creating Apple Wallet pass: {str(e)}", exc_info=True)
             raise
 
-    def _create_unsigned_pass(self, pass_obj: Pass) -> bytes:
+    def _create_unsigned_pass(self, pass_obj: Dict[str, Any]) -> bytes:
         """
         Create an unsigned .pkpass file for development/testing
 
