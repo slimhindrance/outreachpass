@@ -531,7 +531,7 @@ variable "sqs_dlq_name" {
 variable "log_retention_days" {
   description = "CloudWatch log retention in days"
   type        = number
-  default     = 30
+  default     = 7
 }
 
 # ============================================================================

@@ -46,6 +46,24 @@ resource "aws_s3_bucket_cors_configuration" "assets" {
   }
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "assets" {
+  bucket = aws_s3_bucket.assets.id
+
+  rule {
+    id     = "intelligent-tiering"
+    status = "Enabled"
+
+    transition {
+      days          = 30
+      storage_class = "INTELLIGENT_TIERING"
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+  }
+}
+
 # S3 Bucket for Uploads (CSV imports)
 resource "aws_s3_bucket" "uploads" {
   bucket = "outreachpass-${var.environment}-uploads"
@@ -86,8 +104,13 @@ resource "aws_s3_bucket_lifecycle_configuration" "uploads" {
   bucket = aws_s3_bucket.uploads.id
 
   rule {
-    id     = "delete-old-uploads"
+    id     = "intelligent-tiering-and-delete"
     status = "Enabled"
+
+    transition {
+      days          = 1
+      storage_class = "INTELLIGENT_TIERING"
+    }
 
     expiration {
       days = 30
