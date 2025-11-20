@@ -108,6 +108,3 @@ lambda-deploy-*.zip
 .mypy_cache/
 .ruff_cache/
 .eslintcache
-
-# v1 only
-optimalaws/
